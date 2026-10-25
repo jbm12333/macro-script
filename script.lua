@@ -1,15 +1,14 @@
 --[[
 ================================================================================
-  MACRO RECORDER v8.4 — Auto-click en posición fija (559, 511) integrado
+  MACRO RECORDER v8.5 — Auto-click disparado por visibilidad de botón
 ================================================================================
-  CAMBIOS v8.4:
-    • Nueva sección AUTO-CLICK FIJO (559, 511) integrada en el mismo script.
-    • Botón en la UI para activar/desactivar la vigilancia del cursor.
-    • Cuando el cursor entra en (559, 511) ±tolerancia y hay un GuiButton
-      visible/activo → hace click automático (firesignal → mousemoveabs+click
-      → VIM fallback).
-    • Cooldown configurable, marcador visual en la posición objetivo.
-    • Todo lo de v8.3 intacto.
+  CAMBIOS v8.5:
+    • El botón 🎯 ahora vigila un BOTÓN (por path) en vez de vigilar el cursor.
+    • Cuando ese botón pasa de invisible → visible, el script mueve el ratón
+      a (559, 511) y hace click AHÍ (coordenada fija, no sobre el botón).
+    • Cooldown de 0.4 s entre disparos para evitar dobles.
+    • Todo lo de v8.4 intacto (grabación, reproducción, escalado, cámara,
+      HRP, touch, 🐵/🍌, minimizar, queue_on_teleport).
 ================================================================================
 ]]
 
@@ -43,11 +42,11 @@ local unpack = table.unpack or unpack
 --============ GUARD CONTRA DUPLICADOS ============
 pcall(function()
     local cg = game:GetService("CoreGui")
-    local old = cg:FindFirstChild("MacroRec_v8_4"); if old then old:Destroy() end
+    local old = cg:FindFirstChild("MacroRec_v8_5"); if old then old:Destroy() end
     local oldOv = cg:FindFirstChild("MacroRec_Overlay"); if oldOv then oldOv:Destroy() end
     local pg = LocalPlayer:FindFirstChild("PlayerGui")
     if pg then
-        local old2 = pg:FindFirstChild("MacroRec_v8_4"); if old2 then old2:Destroy() end
+        local old2 = pg:FindFirstChild("MacroRec_v8_5"); if old2 then old2:Destroy() end
         local old2ov = pg:FindFirstChild("MacroRec_Overlay"); if old2ov then old2ov:Destroy() end
     end
 end)
@@ -93,11 +92,10 @@ local BASE_GUI_H = 690
 local BAR_W      = 170
 local BAR_H      = 52
 
---============ AUTO-CLICK FIJO (559, 511) ============
-local FIXED_CLICK_X         = 559
-local FIXED_CLICK_Y         = 511
-local FIXED_CLICK_TOLERANCE = 8
-local FIXED_CLICK_COOLDOWN  = 0.4
+--============ AUTO-CLICK POR VISIBILIDAD DE BOTÓN ============
+local FIXED_CLICK_X        = 559
+local FIXED_CLICK_Y        = 511
+local FIXED_CLICK_COOLDOWN = 0.4
 
 local DEBUG_KEYS = true
 local FORCE_VIM  = false
@@ -211,7 +209,7 @@ end
 local guiParent = getGuiParent()
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "MacroRec_v8_4"
+ScreenGui.Name = "MacroRec_v8_5"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.IgnoreGuiInset = true
@@ -236,8 +234,8 @@ local state = {
     savedHumanoid      = nil,
     startViewport   = nil,
     playViewport    = nil,
-    fixedClickActive = false,
-    fixedClickLastAt = 0,
+    fixedClickActive  = false,
+    fixedClickLastAt  = 0,
     fixedClickLastBtn = nil,
 }
 
@@ -279,7 +277,7 @@ Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 8)
 
 local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -40, 1, 0); Title.Position = UDim2.new(0, 12, 0, 0)
-Title.BackgroundTransparency = 1; Title.Text = "● Macro Recorder v8.4"
+Title.BackgroundTransparency = 1; Title.Text = "● Macro Recorder v8.5"
 Title.TextColor3 = Color3.fromRGB(210, 210, 255)
 Title.Font = Enum.Font.GothamBold; Title.TextSize = 13
 Title.TextXAlignment = Enum.TextXAlignment.Left; Title.Parent = TitleBar
@@ -396,13 +394,12 @@ local BtnCapture      = mkMiniBtn("🎯 Capt",   Color3.fromRGB(120, 100, 180),1
 local ForceMouseBtn   = mkMiniBtn("🖱 Forz",   Color3.fromRGB(60, 60, 80),   200, 60)
 local MovToggleBtn    = mkMiniBtn("🏃 Mov ON", Color3.fromRGB(50, 130, 70),  265, 120)
 
--- NUEVO: fila de auto-click fijo
 local fixedY = autoY2 + 30
 local FixedClickBtn = Instance.new("TextButton")
 FixedClickBtn.Size = UDim2.new(1, -20, 0, 24)
 FixedClickBtn.Position = UDim2.new(0, 10, 0, fixedY)
 FixedClickBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
-FixedClickBtn.Text = "🎯 Auto-click fijo (" .. FIXED_CLICK_X .. ", " .. FIXED_CLICK_Y .. "): OFF"
+FixedClickBtn.Text = "🎯 Vigilar botón → click en (" .. FIXED_CLICK_X .. "," .. FIXED_CLICK_Y .. "): OFF"
 FixedClickBtn.TextColor3 = Color3.new(1, 1, 1)
 FixedClickBtn.Font = Enum.Font.GothamBold
 FixedClickBtn.TextSize = 11
@@ -484,7 +481,6 @@ OverlayGui.IgnoreGuiInset = true; OverlayGui.DisplayOrder = 1000000
 pcall(function() OverlayGui.Parent = guiParent end)
 if not OverlayGui.Parent then OverlayGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
--- Marcador del auto-click fijo
 local FixedMarker = Instance.new("Frame")
 FixedMarker.Size = UDim2.new(0, 16, 0, 16)
 FixedMarker.Position = UDim2.new(0, FIXED_CLICK_X - 8, 0, FIXED_CLICK_Y - 8)
@@ -623,7 +619,7 @@ local function restoreWindow()
             d:SetAttribute("_MRVisSaved", nil)
         end
     end
-    Title.Text = "● Macro Recorder v8.4"
+    Title.Text = "● Macro Recorder v8.5"
     CloseBtn.Visible = true
 end
 
@@ -1265,7 +1261,7 @@ local function mousemoveToRoblox(targetX, targetY, maxIter)
 end
 
 --==================================================================
---  AUTO-CLICK
+--  AUTO-CLICK POR PATH (PlayAgain u otro)
 --==================================================================
 local function resolveGuiPath(relPath)
     local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
@@ -1406,43 +1402,60 @@ local function clickPlayAgain()
 end
 
 --==================================================================
---  AUTO-CLICK FIJO (559, 511)
+--  AUTO-CLICK POR VISIBILIDAD DE BOTÓN
 --==================================================================
-local function getButtonAtFixedPos(x, y)
-    local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
-    if not pg then return nil end
+local fixedBtnWasVisible = false
 
-    local function checkChild(parent, gui)
-        for _, child in ipairs(parent:GetChildren()) do
-            if child:IsA("GuiButton") and child.Visible and child.Active then
-                local ap, as = child.AbsolutePosition, child.AbsoluteSize
-                if as.X > 0 and as.Y > 0
-                   and x >= ap.X and x <= ap.X + as.X
-                   and y >= ap.Y and y <= ap.Y + as.Y then
-                    local p = child.Parent
-                    local visibleChain = true
-                    while p and p ~= gui do
-                        if p:IsA("GuiObject") and not p.Visible then
-                            visibleChain = false; break
-                        end
-                        p = p.Parent
-                    end
-                    if visibleChain then return child end
-                end
-            end
-            local found = checkChild(child, gui)
-            if found then return found end
-        end
-        return nil
-    end
+local function resolveFixedBtn()
+    local path = (PathBox.Text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if path == "" then return nil end
+    return resolveGuiPath(path)
+end
 
-    for _, gui in ipairs(pg:GetChildren()) do
-        if gui:IsA("LayerCollector") and gui.Enabled then
-            local found = checkChild(gui, gui)
-            if found then return found end
-        end
+local function isBtnFullyVisible(btn)
+    if not btn then return false end
+    if not btn.Visible then return false end
+    local p = btn.Parent
+    while p and p ~= game do
+        if p:IsA("GuiObject") and not p.Visible then return false end
+        if p:IsA("LayerCollector") and not p.Enabled then return false end
+        p = p.Parent
     end
-    return nil
+    return true
+end
+
+local function moveCursorAndClick()
+    if fn.mousemoveabs then
+        pcall(fn.mousemoveabs, FIXED_CLICK_X, FIXED_CLICK_Y)
+        task.wait(0.03)
+    end
+    local clicked = false
+    if type(fn.mouse1click) == "function" then
+        local ok = pcall(fn.mouse1click)
+        if ok then clicked = true end
+    end
+    if type(fn.mouse1press) == "function" and type(fn.mouse1release) == "function" then
+        pcall(fn.mouse1press)
+        task.wait(0.05)
+        pcall(fn.mouse1release)
+        clicked = true
+    end
+    if not clicked and hasVIMSendMouse then
+        pcall(function()
+            VirtualInputManager:SendMouseButtonEvent(FIXED_CLICK_X, FIXED_CLICK_Y, 0, true, game, 0)
+            task.wait(0.05)
+            VirtualInputManager:SendMouseButtonEvent(FIXED_CLICK_X, FIXED_CLICK_Y, 0, false, game, 0)
+        end)
+        clicked = true
+    end
+    if not clicked and hasFireTouchInput then
+        pcall(firetouchinput, FIXED_CLICK_X, FIXED_CLICK_Y, 0)
+        task.wait(0.05)
+        pcall(firetouchinput, FIXED_CLICK_X, FIXED_CLICK_Y, 1)
+        clicked = true
+    end
+    clickCircle(FIXED_CLICK_X, FIXED_CLICK_Y, Color3.fromRGB(255, 200, 50))
+    return clicked
 end
 
 local function tryFixedClick()
@@ -1450,22 +1463,25 @@ local function tryFixedClick()
     local now = os.clock()
     if now - state.fixedClickLastAt < FIXED_CLICK_COOLDOWN then return end
 
-    local mp = UserInputService:GetMouseLocation()
-    local dx = mp.X - FIXED_CLICK_X
-    local dy = mp.Y - FIXED_CLICK_Y
-    if math.sqrt(dx*dx + dy*dy) > FIXED_CLICK_TOLERANCE then return end
+    local btn = resolveFixedBtn()
+    local visible = isBtnFullyVisible(btn)
 
-    local btn = getButtonAtFixedPos(FIXED_CLICK_X, FIXED_CLICK_Y)
-    if not btn then return end
-
-    local ok, method = false, "?"
-    if tryClickButton(btn) then ok = true; method = "auto" end
-
-    if ok then
-        state.fixedClickLastAt = now
-        state.fixedClickLastBtn = btn
-        Status.Text = "🎯 Click → " .. btn.ClassName .. " (" .. method .. ")"
-        clickCircle(FIXED_CLICK_X, FIXED_CLICK_Y, Color3.fromRGB(255, 200, 50))
+    if visible and not fixedBtnWasVisible then
+        fixedBtnWasVisible = true
+        task.wait(0.1)
+        local ok = moveCursorAndClick()
+        if ok then
+            state.fixedClickLastAt = now
+            state.fixedClickLastBtn = btn
+            Status.Text = string.format("🎯 Botón visible → click en (%d,%d)",
+                FIXED_CLICK_X, FIXED_CLICK_Y)
+        else
+            Status.Text = "⚠ Botón visible pero no se pudo clickear"
+        end
+        return
+    end
+    if not visible and fixedBtnWasVisible then
+        fixedBtnWasVisible = false
     end
 end
 
@@ -2282,15 +2298,22 @@ end)
 FixedClickBtn.MouseButton1Click:Connect(function()
     state.fixedClickActive = not state.fixedClickActive
     if state.fixedClickActive then
-        FixedClickBtn.Text = "🎯 Auto-click fijo (" .. FIXED_CLICK_X .. ", " .. FIXED_CLICK_Y .. "): ON"
+        local path = (PathBox.Text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if path == "" then
+            state.fixedClickActive = false
+            Status.Text = "⚠ Escribe primero el path del botón a vigilar"
+            return
+        end
+        fixedBtnWasVisible = false
+        FixedClickBtn.Text = "🎯 Vigilar botón → click en (" .. FIXED_CLICK_X .. "," .. FIXED_CLICK_Y .. "): ON"
         FixedClickBtn.BackgroundColor3 = Color3.fromRGB(50, 130, 70)
         FixedMarker.Visible = true
-        Status.Text = "🎯 Vigilando (" .. FIXED_CLICK_X .. ", " .. FIXED_CLICK_Y .. ")"
+        Status.Text = "🎯 Vigilando: " .. path
     else
-        FixedClickBtn.Text = "🎯 Auto-click fijo (" .. FIXED_CLICK_X .. ", " .. FIXED_CLICK_Y .. "): OFF"
+        FixedClickBtn.Text = "🎯 Vigilar botón → click en (" .. FIXED_CLICK_X .. "," .. FIXED_CLICK_Y .. "): OFF"
         FixedClickBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
         FixedMarker.Visible = false
-        Status.Text = "Auto-click fijo desactivado"
+        Status.Text = "Auto-click por visibilidad desactivado"
     end
 end)
 
@@ -2418,7 +2441,6 @@ UserInputService.InputBegan:Connect(function(input, gp)
         if state.recording then stopRecording() end
         if state.playing then stopPlayback() end
     elseif input.KeyCode == Enum.KeyCode.F11 then
-        -- Toggle rápido del auto-click fijo
         if FixedClickBtn and FixedClickBtn.Parent then
             FixedClickBtn:FireClick()
         end
@@ -2501,14 +2523,14 @@ if state.autoloadName then
     end
 end
 
-print("=== Macro Recorder v8.4 ===")
+print("=== Macro Recorder v8.5 ===")
 print(string.format("[Plataforma] Touch=%s Mouse=%s Keyboard=%s | firetouchinput=%s VIM=%s",
     tostring(TouchEnabled), tostring(MouseEnabled), tostring(KeyboardEnabled),
     tostring(hasFireTouchInput), tostring(hasVIMSendMouse)))
 print(string.format("[Viewport inicial] %dx%d",
     currentViewport().X, currentViewport().Y))
-print(string.format("[Auto-click fijo] (%d, %d) ±%d px | cooldown %.2fs",
-    FIXED_CLICK_X, FIXED_CLICK_Y, FIXED_CLICK_TOLERANCE, FIXED_CLICK_COOLDOWN))
-print("F8=Grabar  F9=Reproducir  F10=Detener  F11=Auto-click fijo ON/OFF")
-print("🐵 = auto-ejecutar  🍌 = quitar  |  🎯 = vigilar (559, 511)")
+print(string.format("[Auto-click] vigilar botón del PathBox → cursor a (%d,%d) y click | cooldown %.2fs",
+    FIXED_CLICK_X, FIXED_CLICK_Y, FIXED_CLICK_COOLDOWN))
+print("F8=Grabar  F9=Reproducir  F10=Detener  F11=Vigilar botón ON/OFF")
+print("🐵 = auto-ejecutar  🍌 = quitar  |  🎯 = vigilar botón → click (559,511)")
 print("Carpeta activa: " .. tostring(activeFolder))
