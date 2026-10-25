@@ -1,37 +1,37 @@
 --[[
 ================================================================================
-  MACRO RECORDER v8.2 — Auto-ejecutable vía autoexec + queue_on_teleport
+  MACRO RECORDER v8.3 — Escalado de resolución + GUI responsive
 ================================================================================
-  CAMBIOS v8.2:
-    • Añadida espera de carga de juego y personaje al inicio para que el
-      script funcione correctamente cuando se lanza desde la carpeta
-      autoexec del ejecutor (antes de que el Character exista).
-    • Añadido bloque opcional queue_on_teleport (comentado) para persistir
-      tras server hops si subes el script a una URL.
-    • Todo lo de v8.1 (minimizar al reproducir, touch real, cámara
-      multi-capa, HRP, 🐵/🍌) intacto.
+  CAMBIOS v8.3:
+    • Guarda startViewport al grabar (dentro del JSON como startViewport).
+    • Al reproducir, escala todas las coordenadas (mouse, touchdown, touchmove,
+      touchup, tap, pan, longpress) proporcionalmente a la resolución actual.
+    • GUI responsive con UIScale: se encoge automáticamente si no cabe
+      (portrait, pantallas pequeñas, móvil).
+    • Detecta cambios de resolución (rotación de móvil) y re-escala en vivo.
+    • Minimizar al reproducir respeta UIScale (barra legible en cualquier pantalla).
+    • Guard contra ejecuciones duplicadas (autoexec + queue_on_teleport).
+    • queue_on_teleport ACTIVADO apuntando a tu URL de GitHub.
+    • Todo lo de v8.2 intacto (cámara multi-capa, touch real, HRP, 🐵/🍌).
 ================================================================================
 ]]
 
 --============ AUTO-RELANZADOR TRAS TELEPORT ============
 do
     local RAW_URL = "https://raw.githubusercontent.com/jbm12333/macro-script/refs/heads/main/script.lua"
-    local payload = 'pcall(function() loadstring(game:HttpGet("' .. RAW_URL .. '"))() end)'
-
+    local payload = 'pcall(function() loadstring(game:HttpGet("' .. RAW_URL .. '", true))() end)'
     local ok = false
     if type(queue_on_teleport) == "function" then
         ok = pcall(queue_on_teleport, payload)
     elseif type(syn) == "table" and type(syn.queue_on_teleport) == "function" then
         ok = pcall(syn.queue_on_teleport, payload)
     end
-
     if ok then
-        print("[MacroRec] 📡 Relanzamiento configurado → " .. RAW_URL)
+        print("[MacroRec] 📡 queue_on_teleport activo → " .. RAW_URL)
     else
-        warn("[MacroRec] ⚠ queue_on_teleport no disponible. Usa autoexec para persistencia total.")
+        print("[MacroRec] ⚠ queue_on_teleport no disponible. Usa autoexec para persistencia.")
     end
 end
-
 
 local Players          = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -42,6 +42,18 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
 local unpack = table.unpack or unpack
+
+--============ GUARD CONTRA DUPLICADOS ============
+pcall(function()
+    local cg = game:GetService("CoreGui")
+    local old = cg:FindFirstChild("MacroRec_v8_3"); if old then old:Destroy() end
+    local oldOv = cg:FindFirstChild("MacroRec_Overlay"); if oldOv then oldOv:Destroy() end
+    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+    if pg then
+        local old2 = pg:FindFirstChild("MacroRec_v8_3"); if old2 then old2:Destroy() end
+        local old2ov = pg:FindFirstChild("MacroRec_Overlay"); if old2ov then old2ov:Destroy() end
+    end
+end)
 
 --============ ESPERA DE CARGA (para autoexec) ============
 if not game:IsLoaded() then
@@ -78,6 +90,11 @@ local REC_CAM_ROT_THRESH   = 0.03
 local REC_CAM_FOV_THRESH   = 0.5
 local REC_HRP_POS_THRESH   = 0.10
 local REC_HRP_ROT_THRESH   = 0.08
+
+local BASE_GUI_W = 400
+local BASE_GUI_H = 690
+local BAR_W      = 170
+local BAR_H      = 52
 
 local DEBUG_KEYS = true
 local FORCE_VIM  = false
@@ -191,7 +208,7 @@ end
 local guiParent = getGuiParent()
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "MacroRec_v8_2"
+ScreenGui.Name = "MacroRec_v8_3"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.IgnoreGuiInset = true
@@ -214,6 +231,8 @@ local state = {
     hasHrpData      = false,
     controlledHumanoid = nil,
     savedHumanoid      = nil,
+    startViewport   = nil,
+    playViewport    = nil,
 }
 
 --============ CAMERA LOCK (multi-capa) ============
@@ -234,13 +253,17 @@ MacroInput.Name = "MacroInput"; MacroInput.Parent = ScreenGui
 
 local Main = Instance.new("Frame")
 Main.Name = "Main"
-Main.Size = UDim2.new(0, 400, 0, 690)
+Main.Size = UDim2.new(0, BASE_GUI_W, 0, BASE_GUI_H)
 Main.Position = UDim2.new(0, 20, 0, 40)
 Main.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
 Main.BorderSizePixel = 0; Main.Parent = ScreenGui
 Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 8)
 local MainStroke = Instance.new("UIStroke", Main)
 MainStroke.Color = Color3.fromRGB(70, 70, 100)
+
+local MainScale = Instance.new("UIScale")
+MainScale.Scale = 1
+MainScale.Parent = Main
 
 local TitleBar = Instance.new("Frame")
 TitleBar.Size = UDim2.new(1, 0, 0, 30)
@@ -250,7 +273,7 @@ Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 8)
 
 local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -40, 1, 0); Title.Position = UDim2.new(0, 12, 0, 0)
-Title.BackgroundTransparency = 1; Title.Text = "● Macro Recorder v8.2"
+Title.BackgroundTransparency = 1; Title.Text = "● Macro Recorder v8.3"
 Title.TextColor3 = Color3.fromRGB(210, 210, 255)
 Title.Font = Enum.Font.GothamBold; Title.TextSize = 13
 Title.TextXAlignment = Enum.TextXAlignment.Left; Title.Parent = TitleBar
@@ -503,19 +526,38 @@ local function drawCrosshair(x, y, color, lifetime)
 end
 
 --==================================================================
+--  VIEWPORT + ESCALADO
+--==================================================================
+local function currentViewport()
+    local cam = workspace.CurrentCamera
+    if cam then return cam.ViewportSize end
+    return Vector2.new(1920, 1080)
+end
+
+local function scalePoint(x, y)
+    local oldVP = state.playViewport
+    if not oldVP then return x, y end
+    local newVP = currentViewport()
+    if oldVP.X <= 0 or oldVP.Y <= 0 then return x, y end
+    return x * (newVP.X / oldVP.X), y * (newVP.Y / oldVP.Y)
+end
+
+--==================================================================
 --  MINIMIZAR VENTANA AL REPRODUCIR
 --==================================================================
 local savedWindow = nil
 
 local function minimizeToRight()
     if savedWindow then return end
-    savedWindow = { size = Main.Size, pos = Main.Position }
-
-    local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
-               or Vector2.new(1920, 1080)
-    local barW, barH = 170, 52
-    Main.Size = UDim2.new(0, barW, 0, barH)
-    Main.Position = UDim2.new(1, -(barW + 8), 0, math.floor((vp.Y - barH) / 2))
+    savedWindow = {
+        size  = Main.Size,
+        pos   = Main.Position,
+        scale = MainScale.Scale,
+    }
+    MainScale.Scale = 1
+    local vp = currentViewport()
+    Main.Size = UDim2.new(0, BAR_W, 0, BAR_H)
+    Main.Position = UDim2.new(1, -(BAR_W + 8), 0, math.floor((vp.Y - BAR_H) / 2))
 
     for _, d in ipairs(Main:GetDescendants()) do
         if (d:IsA("GuiObject") or d:IsA("GuiButton")) and d ~= Main
@@ -536,6 +578,7 @@ local function restoreWindow()
     if not savedWindow then return end
     Main.Size = savedWindow.size
     Main.Position = savedWindow.pos
+    MainScale.Scale = savedWindow.scale
     savedWindow = nil
 
     for _, d in ipairs(Main:GetDescendants()) do
@@ -545,8 +588,38 @@ local function restoreWindow()
             d:SetAttribute("_MRVisSaved", nil)
         end
     end
-    Title.Text = "● Macro Recorder v8.2"
+    Title.Text = "● Macro Recorder v8.3"
     CloseBtn.Visible = true
+end
+
+--==================================================================
+--  GUI RESPONSIVE
+--==================================================================
+local function updateGuiScale()
+    if savedWindow then return end
+    local vp = currentViewport()
+    local sx = (vp.X - 20) / BASE_GUI_W
+    local sy = (vp.Y - 20) / BASE_GUI_H
+    local newScale = math.min(sx, sy, 1)
+    newScale = math.max(newScale, 0.4)
+
+    if math.abs(newScale - MainScale.Scale) > 0.02 then
+        MainScale.Scale = newScale
+    end
+
+    local scaledW = math.floor(BASE_GUI_W * newScale)
+    local scaledH = math.floor(BASE_GUI_H * newScale)
+    local posX = Main.Position.X.Offset
+    local posY = Main.Position.Y.Offset
+    if posX + scaledW > vp.X then
+        posX = math.max(10, vp.X - scaledW - 10)
+    end
+    if posY + scaledH > vp.Y then
+        posY = math.max(10, vp.Y - scaledH - 10)
+    end
+    if posX ~= Main.Position.X.Offset or posY ~= Main.Position.Y.Offset then
+        Main.Position = UDim2.new(0, posX, 0, posY)
+    end
 end
 
 --==================================================================
@@ -863,6 +936,7 @@ local function importFromText(raw)
         if rec.startHrpCFrame then extra.startHrpCFrame = rec.startHrpCFrame end
         if rec.startCamCFrame then extra.startCamCFrame = rec.startCamCFrame end
         if rec.startCamFOV    then extra.startCamFOV    = rec.startCamFOV    end
+        if rec.startViewport  then extra.startViewport  = rec.startViewport  end
         local okS = saveRecording(n, rec.events, rec.duration or 0, rec.created, extra)
         if okS then
             saved = saved + 1
@@ -890,19 +964,29 @@ local function cframesDiffer(a, b, posT, rotT)
     for i = 4, 12 do if math.abs(ac[i] - bc[i]) > rotT then return true end end
     return false
 end
-local function isOverGui()
-    local mp = UserInputService:GetMouseLocation()
-    if Main.Visible then
-        local ap, as = Main.AbsolutePosition, Main.AbsoluteSize
-        if mp.X >= ap.X and mp.X <= ap.X + as.X
-           and mp.Y >= ap.Y and mp.Y <= ap.Y + as.Y then return true end
+local function getMainBounds()
+    if savedWindow then
+        local x = Main.Position.X.Offset
+        local y = Main.Position.Y.Offset
+        return x, y, BAR_W, BAR_H
     end
-    return false
+    local scale = (MainScale and MainScale.Scale) or 1
+    local x = Main.Position.X.Offset
+    local y = Main.Position.Y.Offset
+    local w = math.floor(BASE_GUI_W * scale)
+    local h = math.floor(BASE_GUI_H * scale)
+    return x, y, w, h
 end
-local function isPointOverMainGui(x, y)
+local function isOverGui()
     if not Main.Visible then return false end
-    local ap, as = Main.AbsolutePosition, Main.AbsoluteSize
-    return x >= ap.X and x <= ap.X + as.X and y >= ap.Y and y <= ap.Y + as.Y
+    local mp = UserInputService:GetMouseLocation()
+    local x, y, w, h = getMainBounds()
+    return mp.X >= x and mp.X <= x + w and mp.Y >= y and mp.Y <= y + h
+end
+local function isPointOverMainGui(px, py)
+    if not Main.Visible then return false end
+    local x, y, w, h = getMainBounds()
+    return px >= x and px <= x + w and py >= y and py <= y + h
 end
 
 local function findBracket(kfs, t)
@@ -1379,12 +1463,16 @@ local function startRecording()
     local cam = workspace.CurrentCamera
     state.startCamCFrame = cam and cam.CFrame or nil
     state.startCamFOV    = cam and cam.FieldOfView or nil
+    state.startViewport  = currentViewport()
+
     if state.startHrpCFrame then
         local p = state.startHrpCFrame.Position
         print(string.format("[MacroRec] Pos inicial: (%.1f, %.1f, %.1f)", p.X, p.Y, p.Z))
     else
         print("[MacroRec] ⚠ No pude capturar HRP inicial")
     end
+    print(string.format("[MacroRec] Viewport grabado: %dx%d",
+        state.startViewport.X, state.startViewport.Y))
 
     RecDot.Visible = true; BtnRecord.Text = "■ Parar"
     BtnRecord.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
@@ -1419,6 +1507,9 @@ local function stopRecording()
     end
     if state.startCamFOV then
         extra.startCamFOV = state.startCamFOV
+    end
+    if state.startViewport then
+        extra.startViewport = { state.startViewport.X, state.startViewport.Y }
     end
 
     local okSave, msgSave = saveRecording(name, state.events, duration, nil, extra)
@@ -1731,30 +1822,43 @@ local function applyEvent(ev)
         state.activeKeys[ev.key] = nil
     elseif t == "m1down" then
         if fn.mouse1press then pcall(fn.mouse1press) end
-        clickCircle(Cursor.AbsolutePosition.X + 7, Cursor.AbsolutePosition.Y + 7, Color3.fromRGB(255, 90, 90))
-    elseif t == "m1up" then if fn.mouse1release then pcall(fn.mouse1release) end
+        local cx, cy = Cursor.AbsolutePosition.X + 7, Cursor.AbsolutePosition.Y + 7
+        clickCircle(cx, cy, Color3.fromRGB(255, 90, 90))
+    elseif t == "m1up" then
+        if fn.mouse1release then pcall(fn.mouse1release) end
     elseif t == "m2down" then
         if fn.mouse2press then pcall(fn.mouse2press) end
-        clickCircle(Cursor.AbsolutePosition.X + 7, Cursor.AbsolutePosition.Y + 7, Color3.fromRGB(90, 150, 255))
-    elseif t == "m2up" then if fn.mouse2release then pcall(fn.mouse2release) end
-    elseif t == "wheel" then if fn.mousescroll then pcall(fn.mousescroll, ev.delta) end
+        local cx, cy = Cursor.AbsolutePosition.X + 7, Cursor.AbsolutePosition.Y + 7
+        clickCircle(cx, cy, Color3.fromRGB(90, 150, 255))
+    elseif t == "m2up" then
+        if fn.mouse2release then pcall(fn.mouse2release) end
+    elseif t == "wheel" then
+        if fn.mousescroll then pcall(fn.mousescroll, ev.delta) end
     elseif t == "mouse" then
-        setFakeCursor(ev.x, ev.y); if fn.mousemoveabs then pcall(fn.mousemoveabs, ev.x, ev.y) end
+        local sx, sy = scalePoint(ev.x, ev.y)
+        setFakeCursor(sx, sy)
+        if fn.mousemoveabs then pcall(fn.mousemoveabs, sx, sy) end
     elseif t == "touchdown" then
-        fireTouchDown(ev.x, ev.y, ev.id)
-        clickCircle(ev.x, ev.y, Color3.fromRGB(255, 200, 50))
+        local sx, sy = scalePoint(ev.x, ev.y)
+        fireTouchDown(sx, sy, ev.id)
+        clickCircle(sx, sy, Color3.fromRGB(255, 200, 50))
     elseif t == "touchmove" then
-        fireTouchMove(ev.x, ev.y, ev.id)
+        local sx, sy = scalePoint(ev.x, ev.y)
+        fireTouchMove(sx, sy, ev.id)
     elseif t == "touchup" then
-        fireTouchUp(ev.x, ev.y, ev.id)
+        local sx, sy = scalePoint(ev.x, ev.y)
+        fireTouchUp(sx, sy, ev.id)
     elseif t == "tap" then
-        fireLegacyTap(ev.x, ev.y)
-        clickCircle(ev.x, ev.y, Color3.fromRGB(255, 200, 50))
+        local sx, sy = scalePoint(ev.x, ev.y)
+        fireLegacyTap(sx, sy)
+        clickCircle(sx, sy, Color3.fromRGB(255, 200, 50))
     elseif t == "pan" then
-        fireLegacyPan(ev.x, ev.y)
+        local sx, sy = scalePoint(ev.x, ev.y)
+        fireLegacyPan(sx, sy)
     elseif t == "longpress" then
-        fireLegacyLongPress(ev.x, ev.y)
-        clickCircle(ev.x, ev.y, Color3.fromRGB(200, 100, 255))
+        local sx, sy = scalePoint(ev.x, ev.y)
+        fireLegacyLongPress(sx, sy)
+        clickCircle(sx, sy, Color3.fromRGB(200, 100, 255))
     end
     refreshKeysLabel()
     pcall(function() MacroInput:Fire(ev) end)
@@ -1782,6 +1886,7 @@ local function stopPlayback()
     unlockCamera()
     state.playing = false; state.currentSession = state.currentSession + 1
     state.camKeyframes = nil; state.hrpKeyframes = nil; state.hasHrpData = false
+    state.playViewport = nil
     Cursor.Visible = false; KeysLabel.Visible = false; StopOverlay.Visible = false
     restoreWindow()
     setMainInteractive(true)
@@ -1800,6 +1905,19 @@ local function playRecording(events, name, looped, rec)
     local focused = UserInputService:GetFocusedTextBox()
     if focused and focused.ReleaseFocus then
         pcall(function() focused:ReleaseFocus() end)
+    end
+
+    -- Cargar viewport de la grabación
+    if rec and rec.startViewport and #rec.startViewport == 2 then
+        state.playViewport = { X = rec.startViewport[1], Y = rec.startViewport[2] }
+        local cur = currentViewport()
+        print(string.format("[MacroRec] 🔍 Escalando %dx%d → %dx%d (sx=%.2f sy=%.2f)",
+            state.playViewport.X, state.playViewport.Y, cur.X, cur.Y,
+            cur.X / state.playViewport.X, cur.Y / state.playViewport.Y))
+    else
+        local cur = currentViewport()
+        state.playViewport = { X = cur.X, Y = cur.Y }
+        print("[MacroRec] ℹ️ Macro sin viewport guardado → sin escalar")
     end
 
     lockCamera()
@@ -2191,6 +2309,24 @@ end)
 --==================================================================
 --  INIT
 --==================================================================
+updateGuiScale()
+
+do
+    local lastVP = currentViewport()
+    local conn
+    conn = RunService.RenderStepped:Connect(function()
+        if not Main or not Main.Parent then
+            pcall(function() conn:Disconnect() end)
+            return
+        end
+        local vp = currentViewport()
+        if vp.X ~= lastVP.X or vp.Y ~= lastVP.Y then
+            lastVP = vp
+            pcall(updateGuiScale)
+        end
+    end)
+end
+
 state.autoloadName = readAutoload()
 if state.autoloadName then
     print("[MacroRec] 🍌 Auto-load configurada: " .. state.autoloadName)
@@ -2246,9 +2382,11 @@ if state.autoloadName then
     end
 end
 
-print("=== Macro Recorder v8.2 ===")
+print("=== Macro Recorder v8.3 ===")
 print(string.format("[Plataforma] Touch=%s Mouse=%s Keyboard=%s | firetouchinput=%s VIM=%s",
     tostring(TouchEnabled), tostring(MouseEnabled), tostring(KeyboardEnabled),
     tostring(hasFireTouchInput), tostring(hasVIMSendMouse)))
+print(string.format("[Viewport inicial] %dx%d",
+    currentViewport().X, currentViewport().Y))
 print("F8=Grabar  F9=Reproducir  F10=Detener  |  🐵 = auto-ejecutar  🍌 = quitar")
 print("Carpeta activa: " .. tostring(activeFolder))
