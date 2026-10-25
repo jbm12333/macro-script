@@ -13,16 +13,24 @@
 ================================================================================
 ]]
 
---============ AUTO-RELANZADOR TRAS TELEPORT (opcional) ============
--- Si quieres que el script se re-ejecute tras un server hop / teleport,
--- sube este archivo a una URL (GitHub raw, Pastebin, etc.) y descomenta:
---[[
-if queue_on_teleport then
-    pcall(function()
-        queue_on_teleport('loadstring(game:HttpGet("https://TU_URL_AQUI"))()')
-    end)
+--============ AUTO-RELANZADOR TRAS TELEPORT ============
+do
+    local RAW_URL = "https://raw.githubusercontent.com/jbm12333/macro-script/refs/heads/main/script.lua"
+    local payload = 'pcall(function() loadstring(game:HttpGet("' .. RAW_URL .. '"))() end)'
+
+    local ok = false
+    if type(queue_on_teleport) == "function" then
+        ok = pcall(queue_on_teleport, payload)
+    elseif type(syn) == "table" and type(syn.queue_on_teleport) == "function" then
+        ok = pcall(syn.queue_on_teleport, payload)
+    end
+
+    if ok then
+        print("[MacroRec] 📡 Relanzamiento configurado → " .. RAW_URL)
+    else
+        warn("[MacroRec] ⚠ queue_on_teleport no disponible. Usa autoexec para persistencia total.")
+    end
 end
-]]
 
 
 local Players          = game:GetService("Players")
