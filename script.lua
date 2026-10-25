@@ -1,18 +1,15 @@
 --[[
 ================================================================================
-  MACRO RECORDER v8.3 — Escalado de resolución + GUI responsive
+  MACRO RECORDER v8.4 — Auto-click en posición fija (559, 511) integrado
 ================================================================================
-  CAMBIOS v8.3:
-    • Guarda startViewport al grabar (dentro del JSON como startViewport).
-    • Al reproducir, escala todas las coordenadas (mouse, touchdown, touchmove,
-      touchup, tap, pan, longpress) proporcionalmente a la resolución actual.
-    • GUI responsive con UIScale: se encoge automáticamente si no cabe
-      (portrait, pantallas pequeñas, móvil).
-    • Detecta cambios de resolución (rotación de móvil) y re-escala en vivo.
-    • Minimizar al reproducir respeta UIScale (barra legible en cualquier pantalla).
-    • Guard contra ejecuciones duplicadas (autoexec + queue_on_teleport).
-    • queue_on_teleport ACTIVADO apuntando a tu URL de GitHub.
-    • Todo lo de v8.2 intacto (cámara multi-capa, touch real, HRP, 🐵/🍌).
+  CAMBIOS v8.4:
+    • Nueva sección AUTO-CLICK FIJO (559, 511) integrada en el mismo script.
+    • Botón en la UI para activar/desactivar la vigilancia del cursor.
+    • Cuando el cursor entra en (559, 511) ±tolerancia y hay un GuiButton
+      visible/activo → hace click automático (firesignal → mousemoveabs+click
+      → VIM fallback).
+    • Cooldown configurable, marcador visual en la posición objetivo.
+    • Todo lo de v8.3 intacto.
 ================================================================================
 ]]
 
@@ -46,11 +43,11 @@ local unpack = table.unpack or unpack
 --============ GUARD CONTRA DUPLICADOS ============
 pcall(function()
     local cg = game:GetService("CoreGui")
-    local old = cg:FindFirstChild("MacroRec_v8_3"); if old then old:Destroy() end
+    local old = cg:FindFirstChild("MacroRec_v8_4"); if old then old:Destroy() end
     local oldOv = cg:FindFirstChild("MacroRec_Overlay"); if oldOv then oldOv:Destroy() end
     local pg = LocalPlayer:FindFirstChild("PlayerGui")
     if pg then
-        local old2 = pg:FindFirstChild("MacroRec_v8_3"); if old2 then old2:Destroy() end
+        local old2 = pg:FindFirstChild("MacroRec_v8_4"); if old2 then old2:Destroy() end
         local old2ov = pg:FindFirstChild("MacroRec_Overlay"); if old2ov then old2ov:Destroy() end
     end
 end)
@@ -95,6 +92,12 @@ local BASE_GUI_W = 400
 local BASE_GUI_H = 690
 local BAR_W      = 170
 local BAR_H      = 52
+
+--============ AUTO-CLICK FIJO (559, 511) ============
+local FIXED_CLICK_X         = 559
+local FIXED_CLICK_Y         = 511
+local FIXED_CLICK_TOLERANCE = 8
+local FIXED_CLICK_COOLDOWN  = 0.4
 
 local DEBUG_KEYS = true
 local FORCE_VIM  = false
@@ -208,7 +211,7 @@ end
 local guiParent = getGuiParent()
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "MacroRec_v8_3"
+ScreenGui.Name = "MacroRec_v8_4"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.IgnoreGuiInset = true
@@ -233,6 +236,9 @@ local state = {
     savedHumanoid      = nil,
     startViewport   = nil,
     playViewport    = nil,
+    fixedClickActive = false,
+    fixedClickLastAt = 0,
+    fixedClickLastBtn = nil,
 }
 
 --============ CAMERA LOCK (multi-capa) ============
@@ -273,7 +279,7 @@ Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 8)
 
 local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -40, 1, 0); Title.Position = UDim2.new(0, 12, 0, 0)
-Title.BackgroundTransparency = 1; Title.Text = "● Macro Recorder v8.3"
+Title.BackgroundTransparency = 1; Title.Text = "● Macro Recorder v8.4"
 Title.TextColor3 = Color3.fromRGB(210, 210, 255)
 Title.Font = Enum.Font.GothamBold; Title.TextSize = 13
 Title.TextXAlignment = Enum.TextXAlignment.Left; Title.Parent = TitleBar
@@ -390,8 +396,22 @@ local BtnCapture      = mkMiniBtn("🎯 Capt",   Color3.fromRGB(120, 100, 180),1
 local ForceMouseBtn   = mkMiniBtn("🖱 Forz",   Color3.fromRGB(60, 60, 80),   200, 60)
 local MovToggleBtn    = mkMiniBtn("🏃 Mov ON", Color3.fromRGB(50, 130, 70),  265, 120)
 
+-- NUEVO: fila de auto-click fijo
+local fixedY = autoY2 + 30
+local FixedClickBtn = Instance.new("TextButton")
+FixedClickBtn.Size = UDim2.new(1, -20, 0, 24)
+FixedClickBtn.Position = UDim2.new(0, 10, 0, fixedY)
+FixedClickBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+FixedClickBtn.Text = "🎯 Auto-click fijo (" .. FIXED_CLICK_X .. ", " .. FIXED_CLICK_Y .. "): OFF"
+FixedClickBtn.TextColor3 = Color3.new(1, 1, 1)
+FixedClickBtn.Font = Enum.Font.GothamBold
+FixedClickBtn.TextSize = 11
+FixedClickBtn.BorderSizePixel = 0
+FixedClickBtn.Parent = Main
+Instance.new("UICorner", FixedClickBtn).CornerRadius = UDim.new(0, 4)
+
 local ListHeader = Instance.new("Frame")
-ListHeader.Size = UDim2.new(1, -20, 0, 22); ListHeader.Position = UDim2.new(0, 10, 0, autoY2 + 32)
+ListHeader.Size = UDim2.new(1, -20, 0, 22); ListHeader.Position = UDim2.new(0, 10, 0, fixedY + 28)
 ListHeader.BackgroundTransparency = 1; ListHeader.Parent = Main
 
 local ListHeaderLbl = Instance.new("TextLabel")
@@ -416,7 +436,7 @@ local PasteBtn     = mkHdrBtn("📋", Color3.fromRGB(120, 100, 180), -128)
 local ExportAllBtn = mkHdrBtn("📤", Color3.fromRGB(50, 130, 80),  -84)
 local RefreshBtn   = mkHdrBtn("🔄", Color3.fromRGB(60, 60, 80),   -40)
 
-local listY = autoY2 + 58
+local listY = fixedY + 54
 local ListFrame = Instance.new("Frame")
 ListFrame.Size = UDim2.new(1, -20, 1, -(listY + 36))
 ListFrame.Position = UDim2.new(0, 10, 0, listY)
@@ -463,6 +483,21 @@ OverlayGui.Name = "MacroRec_Overlay"; OverlayGui.ResetOnSpawn = false
 OverlayGui.IgnoreGuiInset = true; OverlayGui.DisplayOrder = 1000000
 pcall(function() OverlayGui.Parent = guiParent end)
 if not OverlayGui.Parent then OverlayGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+
+-- Marcador del auto-click fijo
+local FixedMarker = Instance.new("Frame")
+FixedMarker.Size = UDim2.new(0, 16, 0, 16)
+FixedMarker.Position = UDim2.new(0, FIXED_CLICK_X - 8, 0, FIXED_CLICK_Y - 8)
+FixedMarker.BackgroundColor3 = Color3.fromRGB(255, 200, 50)
+FixedMarker.BackgroundTransparency = 0.35
+FixedMarker.BorderSizePixel = 0
+FixedMarker.ZIndex = 1000000
+FixedMarker.Visible = false
+FixedMarker.Parent = OverlayGui
+Instance.new("UICorner", FixedMarker).CornerRadius = UDim.new(1, 0)
+local fixedMarkerStroke = Instance.new("UIStroke", FixedMarker)
+fixedMarkerStroke.Color = Color3.fromRGB(255, 200, 50)
+fixedMarkerStroke.Thickness = 2
 
 local Cursor = Instance.new("Frame")
 Cursor.Size = UDim2.new(0, 14, 0, 14); Cursor.BackgroundColor3 = Color3.fromRGB(0, 255, 150)
@@ -588,7 +623,7 @@ local function restoreWindow()
             d:SetAttribute("_MRVisSaved", nil)
         end
     end
-    Title.Text = "● Macro Recorder v8.3"
+    Title.Text = "● Macro Recorder v8.4"
     CloseBtn.Visible = true
 end
 
@@ -1371,6 +1406,70 @@ local function clickPlayAgain()
 end
 
 --==================================================================
+--  AUTO-CLICK FIJO (559, 511)
+--==================================================================
+local function getButtonAtFixedPos(x, y)
+    local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    if not pg then return nil end
+
+    local function checkChild(parent, gui)
+        for _, child in ipairs(parent:GetChildren()) do
+            if child:IsA("GuiButton") and child.Visible and child.Active then
+                local ap, as = child.AbsolutePosition, child.AbsoluteSize
+                if as.X > 0 and as.Y > 0
+                   and x >= ap.X and x <= ap.X + as.X
+                   and y >= ap.Y and y <= ap.Y + as.Y then
+                    local p = child.Parent
+                    local visibleChain = true
+                    while p and p ~= gui do
+                        if p:IsA("GuiObject") and not p.Visible then
+                            visibleChain = false; break
+                        end
+                        p = p.Parent
+                    end
+                    if visibleChain then return child end
+                end
+            end
+            local found = checkChild(child, gui)
+            if found then return found end
+        end
+        return nil
+    end
+
+    for _, gui in ipairs(pg:GetChildren()) do
+        if gui:IsA("LayerCollector") and gui.Enabled then
+            local found = checkChild(gui, gui)
+            if found then return found end
+        end
+    end
+    return nil
+end
+
+local function tryFixedClick()
+    if not state.fixedClickActive then return end
+    local now = os.clock()
+    if now - state.fixedClickLastAt < FIXED_CLICK_COOLDOWN then return end
+
+    local mp = UserInputService:GetMouseLocation()
+    local dx = mp.X - FIXED_CLICK_X
+    local dy = mp.Y - FIXED_CLICK_Y
+    if math.sqrt(dx*dx + dy*dy) > FIXED_CLICK_TOLERANCE then return end
+
+    local btn = getButtonAtFixedPos(FIXED_CLICK_X, FIXED_CLICK_Y)
+    if not btn then return end
+
+    local ok, method = false, "?"
+    if tryClickButton(btn) then ok = true; method = "auto" end
+
+    if ok then
+        state.fixedClickLastAt = now
+        state.fixedClickLastBtn = btn
+        Status.Text = "🎯 Click → " .. btn.ClassName .. " (" .. method .. ")"
+        clickCircle(FIXED_CLICK_X, FIXED_CLICK_Y, Color3.fromRGB(255, 200, 50))
+    end
+end
+
+--==================================================================
 --  CAPTURA / HOOK
 --==================================================================
 local captureMode = false
@@ -1655,6 +1754,7 @@ RunService.RenderStepped:Connect(function()
     else
         Chrono.Text = "00:00.000"
     end
+    pcall(tryFixedClick)
 end)
 
 --==================================================================
@@ -1907,7 +2007,6 @@ local function playRecording(events, name, looped, rec)
         pcall(function() focused:ReleaseFocus() end)
     end
 
-    -- Cargar viewport de la grabación
     if rec and rec.startViewport and #rec.startViewport == 2 then
         state.playViewport = { X = rec.startViewport[1], Y = rec.startViewport[2] }
         local cur = currentViewport()
@@ -2180,6 +2279,21 @@ MovToggleBtn.MouseButton1Click:Connect(function()
     end
 end)
 
+FixedClickBtn.MouseButton1Click:Connect(function()
+    state.fixedClickActive = not state.fixedClickActive
+    if state.fixedClickActive then
+        FixedClickBtn.Text = "🎯 Auto-click fijo (" .. FIXED_CLICK_X .. ", " .. FIXED_CLICK_Y .. "): ON"
+        FixedClickBtn.BackgroundColor3 = Color3.fromRGB(50, 130, 70)
+        FixedMarker.Visible = true
+        Status.Text = "🎯 Vigilando (" .. FIXED_CLICK_X .. ", " .. FIXED_CLICK_Y .. ")"
+    else
+        FixedClickBtn.Text = "🎯 Auto-click fijo (" .. FIXED_CLICK_X .. ", " .. FIXED_CLICK_Y .. "): OFF"
+        FixedClickBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+        FixedMarker.Visible = false
+        Status.Text = "Auto-click fijo desactivado"
+    end
+end)
+
 ImportBtn.MouseButton1Click:Connect(function()
     if not hasGetClipboard then Status.Text = "❌ getclipboard no disponible"; return end
     local ok, raw = pcall(getclipboard)
@@ -2303,6 +2417,11 @@ UserInputService.InputBegan:Connect(function(input, gp)
     elseif input.KeyCode == Enum.KeyCode.F10 then
         if state.recording then stopRecording() end
         if state.playing then stopPlayback() end
+    elseif input.KeyCode == Enum.KeyCode.F11 then
+        -- Toggle rápido del auto-click fijo
+        if FixedClickBtn and FixedClickBtn.Parent then
+            FixedClickBtn:FireClick()
+        end
     end
 end)
 
@@ -2382,11 +2501,14 @@ if state.autoloadName then
     end
 end
 
-print("=== Macro Recorder v8.3 ===")
+print("=== Macro Recorder v8.4 ===")
 print(string.format("[Plataforma] Touch=%s Mouse=%s Keyboard=%s | firetouchinput=%s VIM=%s",
     tostring(TouchEnabled), tostring(MouseEnabled), tostring(KeyboardEnabled),
     tostring(hasFireTouchInput), tostring(hasVIMSendMouse)))
 print(string.format("[Viewport inicial] %dx%d",
     currentViewport().X, currentViewport().Y))
-print("F8=Grabar  F9=Reproducir  F10=Detener  |  🐵 = auto-ejecutar  🍌 = quitar")
+print(string.format("[Auto-click fijo] (%d, %d) ±%d px | cooldown %.2fs",
+    FIXED_CLICK_X, FIXED_CLICK_Y, FIXED_CLICK_TOLERANCE, FIXED_CLICK_COOLDOWN))
+print("F8=Grabar  F9=Reproducir  F10=Detener  F11=Auto-click fijo ON/OFF")
+print("🐵 = auto-ejecutar  🍌 = quitar  |  🎯 = vigilar (559, 511)")
 print("Carpeta activa: " .. tostring(activeFolder))
