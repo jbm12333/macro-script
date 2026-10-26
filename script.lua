@@ -1,19 +1,13 @@
 --[[
 ================================================================================
-  MACRO RECORDER v8.5.1 — Auto-click disparado por visibilidad de botón
-                              + Persistencia del watcher entre servers/juegos
+  MACRO RECORDER v8.5.2 — Auto-click disparado por visibilidad de botón
+                              + Persistencia del watcher
+                              + FIX: Out of local registers (límite 200)
 ================================================================================
-  CAMBIOS v8.5.1:
-    • El estado del watcher 🎯 (ON/OFF) y su path se guardan en watcher.json.
-    • Al relanzar el script (queue_on_teleport, nuevo server, nuevo juego)
-      se restauran automáticamente.
-    • F11 ahora togglea correctamente (antes usaba FireClick() inexistente).
-    • watcher.json excluido del listado de grabaciones.
-  CAMBIOS v8.5 (base):
-    • El botón 🎯 vigila un BOTÓN (por path) en vez de vigilar el cursor.
-    • Cuando ese botón pasa de invisible → visible, el script mueve el ratón
-      a (559, 511) y hace click AHÍ (coordenada fija, no sobre el botón).
-    • Cooldown de 0.4 s entre disparos para evitar dobles.
+  CAMBIOS v8.5.2:
+    • Refactorización de ámbitos locales (do...end) para evitar que el
+      script exceda el límite de 200 variables locales en el chunk principal.
+    • Se mantienen todas las funciones de v8.5.1.
 ================================================================================
 ]]
 
@@ -56,7 +50,7 @@ pcall(function()
     end
 end)
 
---============ ESPERA DE CARGA (para autoexec) ============
+--============ ESPERA DE CARGA ============
 if not game:IsLoaded() then
     print("[MacroRec] Esperando a que el juego cargue…")
     game.Loaded:Wait()
@@ -97,7 +91,6 @@ local BASE_GUI_H = 690
 local BAR_W      = 170
 local BAR_H      = 52
 
---============ AUTO-CLICK POR VISIBILIDAD DE BOTÓN ============
 local FIXED_CLICK_X        = 559
 local FIXED_CLICK_Y        = 511
 local FIXED_CLICK_COOLDOWN = 0.4
@@ -203,25 +196,8 @@ local function doKeyRelease(kc)
 end
 
 --==================================================================
---  GUI
+--  ESTADO
 --==================================================================
-local function getGuiParent()
-    if gethui then local ok, h = pcall(gethui); if ok and h then return h end end
-    local ok, cg = pcall(function() return game:GetService("CoreGui") end)
-    if ok and cg then return cg end
-    return LocalPlayer:WaitForChild("PlayerGui")
-end
-local guiParent = getGuiParent()
-
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "MacroRec_v8_5"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ScreenGui.IgnoreGuiInset = true
-ScreenGui.DisplayOrder = 999999
-pcall(function() ScreenGui.Parent = guiParent end)
-if not ScreenGui.Parent then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
-
 local state = {
     recording = false, playing = false, looped = false,
     recordStart = 0, events = {}, activeKeys = {},
@@ -244,7 +220,7 @@ local state = {
     fixedClickLastBtn = nil,
 }
 
---============ CAMERA LOCK (multi-capa) ============
+--============ CAMERA LOCK ============
 local camLocked          = false
 local originalCamType    = nil
 local originalCamSubject = nil
@@ -257,308 +233,301 @@ local camLockConns       = {}
 local camDriftCount      = 0
 local camSetting         = false
 
-local MacroInput = Instance.new("BindableEvent")
-MacroInput.Name = "MacroInput"; MacroInput.Parent = ScreenGui
+--==================================================================
+--  GUI (Encapsulada para ahorrar registros locales)
+--==================================================================
+local ScreenGui, Main, TitleBar, Title, CloseBtn, Chrono, RecDot, WarnBanner, NameBox
+local BtnRecord, BtnPlay, BtnStop, BtnLoop, BtnAuto, PathBox, BtnTestClick
+local BtnInspect, BtnMark, BtnCapture, ForceMouseBtn, MovToggleBtn, FixedClickBtn
+local ListHeaderLbl, ImportBtn, OpenFileBtn, PasteBtn, ExportAllBtn, RefreshBtn
+local Scrolling, Status, PlatformBadge, MainScale
+local OverlayGui, FixedMarker, Cursor, KeysLabel, StopOverlay
+local MacroInput
 
-local Main = Instance.new("Frame")
-Main.Name = "Main"
-Main.Size = UDim2.new(0, BASE_GUI_W, 0, BASE_GUI_H)
-Main.Position = UDim2.new(0, 20, 0, 40)
-Main.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
-Main.BorderSizePixel = 0; Main.Parent = ScreenGui
-Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 8)
-local MainStroke = Instance.new("UIStroke", Main)
-MainStroke.Color = Color3.fromRGB(70, 70, 100)
-
-local MainScale = Instance.new("UIScale")
-MainScale.Scale = 1
-MainScale.Parent = Main
-
-local TitleBar = Instance.new("Frame")
-TitleBar.Size = UDim2.new(1, 0, 0, 30)
-TitleBar.BackgroundColor3 = Color3.fromRGB(38, 38, 50)
-TitleBar.BorderSizePixel = 0; TitleBar.Active = true; TitleBar.Parent = Main
-Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 8)
-
-local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, -40, 1, 0); Title.Position = UDim2.new(0, 12, 0, 0)
-Title.BackgroundTransparency = 1; Title.Text = "● Macro Recorder v8.5.1"
-Title.TextColor3 = Color3.fromRGB(210, 210, 255)
-Title.Font = Enum.Font.GothamBold; Title.TextSize = 13
-Title.TextXAlignment = Enum.TextXAlignment.Left; Title.Parent = TitleBar
-
-local CloseBtn = Instance.new("TextButton")
-CloseBtn.Size = UDim2.new(0, 22, 0, 22); CloseBtn.Position = UDim2.new(1, -28, 0, 4)
-CloseBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60); CloseBtn.Text = "X"
-CloseBtn.TextColor3 = Color3.new(1, 1, 1); CloseBtn.Font = Enum.Font.GothamBold
-CloseBtn.TextSize = 13; CloseBtn.BorderSizePixel = 0; CloseBtn.Parent = TitleBar
-Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 4)
-
-local dragging, dragStart, startPos = false, nil, nil
-TitleBar.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1
-       or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true; dragStart = input.Position; startPos = Main.Position
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then dragging = false end
-        end)
+do
+    local function getGuiParent()
+        if gethui then local ok, h = pcall(gethui); if ok and h then return h end end
+        local ok, cg = pcall(function() return game:GetService("CoreGui") end)
+        if ok and cg then return cg end
+        return LocalPlayer:WaitForChild("PlayerGui")
     end
-end)
-UserInputService.InputChanged:Connect(function(input)
-    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-       or input.UserInputType == Enum.UserInputType.Touch) then
-        local d = input.Position - dragStart
-        Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X,
-                                  startPos.Y.Scale, startPos.Y.Offset + d.Y)
-    end
-end)
+    local guiParent = getGuiParent()
 
-local Chrono = Instance.new("TextLabel")
-Chrono.Size = UDim2.new(1, -20, 0, 34); Chrono.Position = UDim2.new(0, 10, 0, 36)
-Chrono.BackgroundColor3 = Color3.fromRGB(12, 12, 18); Chrono.Text = "00:00.000"
-Chrono.TextColor3 = Color3.fromRGB(100, 255, 120); Chrono.Font = Enum.Font.Code
-Chrono.TextSize = 18; Chrono.Parent = Main
-Instance.new("UICorner", Chrono).CornerRadius = UDim.new(0, 4)
+    ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "MacroRec_v8_5"
+    ScreenGui.ResetOnSpawn = false
+    ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    ScreenGui.IgnoreGuiInset = true
+    ScreenGui.DisplayOrder = 999999
+    pcall(function() ScreenGui.Parent = guiParent end)
+    if not ScreenGui.Parent then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
-local RecDot = Instance.new("Frame")
-RecDot.Size = UDim2.new(0, 12, 0, 12); RecDot.Position = UDim2.new(0, 18, 0, 47)
-RecDot.BackgroundColor3 = Color3.fromRGB(220, 30, 30); RecDot.Visible = false
-RecDot.Parent = Main
-Instance.new("UICorner", RecDot).CornerRadius = UDim.new(1, 0)
+    MacroInput = Instance.new("BindableEvent")
+    MacroInput.Name = "MacroInput"; MacroInput.Parent = ScreenGui
 
-local WarnBanner = Instance.new("TextLabel")
-WarnBanner.Size = UDim2.new(1, -20, 0, 26); WarnBanner.Position = UDim2.new(0, 10, 0, 74)
-WarnBanner.BackgroundColor3 = Color3.fromRGB(140, 30, 30)
-WarnBanner.TextColor3 = Color3.new(1, 1, 1); WarnBanner.Font = Enum.Font.GothamBold
-WarnBanner.TextSize = 10; WarnBanner.TextWrapped = true; WarnBanner.Visible = false
-WarnBanner.Parent = Main
-Instance.new("UICorner", WarnBanner).CornerRadius = UDim.new(0, 4)
+    Main = Instance.new("Frame")
+    Main.Name = "Main"
+    Main.Size = UDim2.new(0, BASE_GUI_W, 0, BASE_GUI_H)
+    Main.Position = UDim2.new(0, 20, 0, 40)
+    Main.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+    Main.BorderSizePixel = 0; Main.Parent = ScreenGui
+    Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 8)
+    local MainStroke = Instance.new("UIStroke", Main)
+    MainStroke.Color = Color3.fromRGB(70, 70, 100)
 
-if not hasFS then
-    WarnBanner.Text = "⚠ Sin FS: memoria. Usa 📤/📋 entre juegos."
-    WarnBanner.Visible = true
-elseif not isSharedFolder then
-    WarnBanner.BackgroundColor3 = Color3.fromRGB(140, 90, 20)
-    WarnBanner.Text = "⚠ Carpeta per-game. Usa 📤/📋 entre juegos."
-    WarnBanner.Visible = true
-end
+    MainScale = Instance.new("UIScale")
+    MainScale.Scale = 1
+    MainScale.Parent = Main
 
-local NameBox = Instance.new("TextBox")
-NameBox.Size = UDim2.new(1, -20, 0, 30)
-NameBox.Position = UDim2.new(0, 10, 0, (hasFS and isSharedFolder) and 78 or 104)
-NameBox.BackgroundColor3 = Color3.fromRGB(40, 40, 52); NameBox.Text = ""
-NameBox.PlaceholderText = "Nombre (vacío = Rec_HHMMSS)"
-NameBox.TextColor3 = Color3.fromRGB(220, 220, 220)
-NameBox.PlaceholderColor3 = Color3.fromRGB(140, 140, 160)
-NameBox.Font = Enum.Font.Gotham; NameBox.TextSize = 13
-NameBox.ClearTextOnFocus = false; NameBox.Parent = Main
-Instance.new("UICorner", NameBox).CornerRadius = UDim.new(0, 4)
+    TitleBar = Instance.new("Frame")
+    TitleBar.Size = UDim2.new(1, 0, 0, 30)
+    TitleBar.BackgroundColor3 = Color3.fromRGB(38, 38, 50)
+    TitleBar.BorderSizePixel = 0; TitleBar.Active = true; TitleBar.Parent = Main
+    Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 8)
 
-local function mkBtn(txt, col, x, y, w, h)
-    local b = Instance.new("TextButton")
-    b.Size = UDim2.new(0, w, 0, h or 32); b.Position = UDim2.new(0, x, 0, y)
-    b.BackgroundColor3 = col; b.Text = txt; b.TextColor3 = Color3.new(1, 1, 1)
-    b.Font = Enum.Font.GothamBold; b.TextSize = 12; b.BorderSizePixel = 0
-    b.Parent = Main
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
-    return b
-end
+    Title = Instance.new("TextLabel")
+    Title.Size = UDim2.new(1, -40, 1, 0); Title.Position = UDim2.new(0, 12, 0, 0)
+    Title.BackgroundTransparency = 1; Title.Text = "● Macro Recorder v8.5.2"
+    Title.TextColor3 = Color3.fromRGB(210, 210, 255)
+    Title.Font = Enum.Font.GothamBold; Title.TextSize = 13
+    Title.TextXAlignment = Enum.TextXAlignment.Left; Title.Parent = TitleBar
 
-local btnY = (hasFS and isSharedFolder) and 116 or 142
-local BtnRecord = mkBtn("● Grabar",     Color3.fromRGB(180, 50, 50),  10, btnY, 92)
-local BtnPlay   = mkBtn("▶ Reproducir", Color3.fromRGB(50, 130, 70),  107, btnY, 100)
-local BtnStop   = mkBtn("■ Detener",    Color3.fromRGB(90, 90, 110),  212, btnY, 80)
-local BtnLoop   = mkBtn("Loop: OFF",    Color3.fromRGB(60, 60, 80),   297, btnY, 93)
+    CloseBtn = Instance.new("TextButton")
+    CloseBtn.Size = UDim2.new(0, 22, 0, 22); CloseBtn.Position = UDim2.new(1, -28, 0, 4)
+    CloseBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60); CloseBtn.Text = "X"
+    CloseBtn.TextColor3 = Color3.new(1, 1, 1); CloseBtn.Font = Enum.Font.GothamBold
+    CloseBtn.TextSize = 13; CloseBtn.BorderSizePixel = 0; CloseBtn.Parent = TitleBar
+    Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 4)
 
-local autoY = btnY + 40
-local BtnAuto = mkBtn("Auto: OFF", Color3.fromRGB(60, 60, 80), 10, autoY, 92)
-local PathBox = Instance.new("TextBox")
-PathBox.Size = UDim2.new(0, 190, 0, 32); PathBox.Position = UDim2.new(0, 107, 0, autoY)
-PathBox.BackgroundColor3 = Color3.fromRGB(40, 40, 52)
-PathBox.Text = "GameUI.FinalUI.Content.PlayAgain"
-PathBox.TextColor3 = Color3.fromRGB(220, 220, 220)
-PathBox.Font = Enum.Font.Gotham; PathBox.TextSize = 11
-PathBox.TextXAlignment = Enum.TextXAlignment.Left; PathBox.ClearTextOnFocus = false
-PathBox.Parent = Main
-Instance.new("UICorner", PathBox).CornerRadius = UDim.new(0, 4)
-local BtnTestClick = mkBtn("Probar", Color3.fromRGB(80, 100, 140), 303, autoY, 87)
-
-local autoY2 = autoY + 38
-local function mkMiniBtn(txt, col, x, w)
-    local b = Instance.new("TextButton")
-    b.Size = UDim2.new(0, w, 0, 26); b.Position = UDim2.new(0, x, 0, autoY2)
-    b.BackgroundColor3 = col; b.Text = txt; b.TextColor3 = Color3.new(1, 1, 1)
-    b.Font = Enum.Font.GothamBold; b.TextSize = 10; b.BorderSizePixel = 0
-    b.Parent = Main
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
-    return b
-end
-local BtnInspect      = mkMiniBtn("🔍 Insp",   Color3.fromRGB(80, 80, 110),  10, 55)
-local BtnMark         = mkMiniBtn("📍 Mapa",   Color3.fromRGB(80, 120, 120), 70, 65)
-local BtnCapture      = mkMiniBtn("🎯 Capt",   Color3.fromRGB(120, 100, 180),140, 55)
-local ForceMouseBtn   = mkMiniBtn("🖱 Forz",   Color3.fromRGB(60, 60, 80),   200, 60)
-local MovToggleBtn    = mkMiniBtn("🏃 Mov ON", Color3.fromRGB(50, 130, 70),  265, 120)
-
-local fixedY = autoY2 + 30
-local FixedClickBtn = Instance.new("TextButton")
-FixedClickBtn.Size = UDim2.new(1, -20, 0, 24)
-FixedClickBtn.Position = UDim2.new(0, 10, 0, fixedY)
-FixedClickBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
-FixedClickBtn.Text = "🎯 Vigilar botón → click en (" .. FIXED_CLICK_X .. "," .. FIXED_CLICK_Y .. "): OFF"
-FixedClickBtn.TextColor3 = Color3.new(1, 1, 1)
-FixedClickBtn.Font = Enum.Font.GothamBold
-FixedClickBtn.TextSize = 11
-FixedClickBtn.BorderSizePixel = 0
-FixedClickBtn.Parent = Main
-Instance.new("UICorner", FixedClickBtn).CornerRadius = UDim.new(0, 4)
-
-local ListHeader = Instance.new("Frame")
-ListHeader.Size = UDim2.new(1, -20, 0, 22); ListHeader.Position = UDim2.new(0, 10, 0, fixedY + 28)
-ListHeader.BackgroundTransparency = 1; ListHeader.Parent = Main
-
-local ListHeaderLbl = Instance.new("TextLabel")
-ListHeaderLbl.Size = UDim2.new(1, -250, 1, 0); ListHeaderLbl.Position = UDim2.new(0, 4, 0, 0)
-ListHeaderLbl.BackgroundTransparency = 1; ListHeaderLbl.Text = "Grabaciones guardadas"
-ListHeaderLbl.TextColor3 = Color3.fromRGB(180, 180, 210)
-ListHeaderLbl.Font = Enum.Font.GothamBold; ListHeaderLbl.TextSize = 12
-ListHeaderLbl.TextXAlignment = Enum.TextXAlignment.Left; ListHeaderLbl.Parent = ListHeader
-
-local function mkHdrBtn(txt, col, x)
-    local b = Instance.new("TextButton")
-    b.Size = UDim2.new(0, 40, 1, 0); b.Position = UDim2.new(1, x, 0, 0)
-    b.BackgroundColor3 = col; b.Text = txt; b.TextColor3 = Color3.new(1, 1, 1)
-    b.Font = Enum.Font.GothamBold; b.TextSize = 11; b.BorderSizePixel = 0
-    b.Parent = ListHeader
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
-    return b
-end
-local ImportBtn    = mkHdrBtn("📥", Color3.fromRGB(50, 100, 150), -216)
-local OpenFileBtn  = mkHdrBtn("📂", Color3.fromRGB(120, 120, 60), -172)
-local PasteBtn     = mkHdrBtn("📋", Color3.fromRGB(120, 100, 180), -128)
-local ExportAllBtn = mkHdrBtn("📤", Color3.fromRGB(50, 130, 80),  -84)
-local RefreshBtn   = mkHdrBtn("🔄", Color3.fromRGB(60, 60, 80),   -40)
-
-local listY = fixedY + 54
-local ListFrame = Instance.new("Frame")
-ListFrame.Size = UDim2.new(1, -20, 1, -(listY + 36))
-ListFrame.Position = UDim2.new(0, 10, 0, listY)
-ListFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 18); ListFrame.Parent = Main
-Instance.new("UICorner", ListFrame).CornerRadius = UDim.new(0, 4)
-
-local Scrolling = Instance.new("ScrollingFrame")
-Scrolling.Size = UDim2.new(1, 0, 1, 0)
-Scrolling.BackgroundTransparency = 1; Scrolling.BorderSizePixel = 0
-Scrolling.ScrollBarThickness = 6; Scrolling.CanvasSize = UDim2.new(0, 0, 0, 0)
-Scrolling.Parent = ListFrame
-
-local ListLayout = Instance.new("UIListLayout")
-ListLayout.Padding = UDim.new(0, 4); ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-ListLayout.Parent = Scrolling
-ListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    Scrolling.CanvasSize = UDim2.new(0, 0, 0, ListLayout.AbsoluteContentSize.Y + 8)
-end)
-
-local Status = Instance.new("TextLabel")
-Status.Size = UDim2.new(1, -120, 0, 20); Status.Position = UDim2.new(0, 12, 1, -26)
-Status.BackgroundTransparency = 1; Status.Text = ""
-Status.TextColor3 = Color3.fromRGB(180, 180, 210); Status.Font = Enum.Font.Gotham
-Status.TextSize = 11; Status.TextXAlignment = Enum.TextXAlignment.Left; Status.Parent = Main
-
-local PlatformBadge = Instance.new("TextLabel")
-PlatformBadge.Size = UDim2.new(0, 100, 0, 20); PlatformBadge.Position = UDim2.new(1, -112, 1, -26)
-PlatformBadge.BackgroundTransparency = 1; PlatformBadge.Font = Enum.Font.GothamBold
-PlatformBadge.TextSize = 10; PlatformBadge.TextXAlignment = Enum.TextXAlignment.Right
-PlatformBadge.Parent = Main
-if isMobileMode then
-    PlatformBadge.Text = "📱 Móvil"
-    PlatformBadge.TextColor3 = Color3.fromRGB(100, 220, 150)
-elseif TouchEnabled then
-    PlatformBadge.Text = "🖥️📱 Mixto"
-    PlatformBadge.TextColor3 = Color3.fromRGB(220, 200, 100)
-else
-    PlatformBadge.Text = "🖥️ PC"
-    PlatformBadge.TextColor3 = Color3.fromRGB(150, 160, 240)
-end
-
-local OverlayGui = Instance.new("ScreenGui")
-OverlayGui.Name = "MacroRec_Overlay"; OverlayGui.ResetOnSpawn = false
-OverlayGui.IgnoreGuiInset = true; OverlayGui.DisplayOrder = 1000000
-pcall(function() OverlayGui.Parent = guiParent end)
-if not OverlayGui.Parent then OverlayGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
-
-local FixedMarker = Instance.new("Frame")
-FixedMarker.Size = UDim2.new(0, 16, 0, 16)
-FixedMarker.Position = UDim2.new(0, FIXED_CLICK_X - 8, 0, FIXED_CLICK_Y - 8)
-FixedMarker.BackgroundColor3 = Color3.fromRGB(255, 200, 50)
-FixedMarker.BackgroundTransparency = 0.35
-FixedMarker.BorderSizePixel = 0
-FixedMarker.ZIndex = 1000000
-FixedMarker.Visible = false
-FixedMarker.Parent = OverlayGui
-Instance.new("UICorner", FixedMarker).CornerRadius = UDim.new(1, 0)
-local fixedMarkerStroke = Instance.new("UIStroke", FixedMarker)
-fixedMarkerStroke.Color = Color3.fromRGB(255, 200, 50)
-fixedMarkerStroke.Thickness = 2
-
-local Cursor = Instance.new("Frame")
-Cursor.Size = UDim2.new(0, 14, 0, 14); Cursor.BackgroundColor3 = Color3.fromRGB(0, 255, 150)
-Cursor.BackgroundTransparency = 0.35; Cursor.BorderSizePixel = 0; Cursor.Visible = false
-Cursor.ZIndex = 1000000; Cursor.Parent = OverlayGui
-Instance.new("UICorner", Cursor).CornerRadius = UDim.new(1, 0)
-local CursorStroke = Instance.new("UIStroke", Cursor)
-CursorStroke.Color = Color3.fromRGB(0, 255, 150); CursorStroke.Thickness = 1
-
-local KeysLabel = Instance.new("TextLabel")
-KeysLabel.Size = UDim2.new(0, 260, 0, 24); KeysLabel.Position = UDim2.new(0, 20, 1, -46)
-KeysLabel.BackgroundColor3 = Color3.fromRGB(0, 0, 0); KeysLabel.BackgroundTransparency = 0.4
-KeysLabel.Text = ""; KeysLabel.TextColor3 = Color3.fromRGB(0, 255, 150)
-KeysLabel.Font = Enum.Font.Code; KeysLabel.TextSize = 14
-KeysLabel.TextXAlignment = Enum.TextXAlignment.Left; KeysLabel.Visible = false
-KeysLabel.Parent = OverlayGui
-
-local StopOverlay = Instance.new("TextButton")
-StopOverlay.Size = UDim2.new(0, 130, 0, 34); StopOverlay.Position = UDim2.new(1, -150, 0, 20)
-StopOverlay.BackgroundColor3 = Color3.fromRGB(190, 50, 50); StopOverlay.Text = "■ STOP (F10)"
-StopOverlay.TextColor3 = Color3.new(1, 1, 1); StopOverlay.Font = Enum.Font.GothamBold
-StopOverlay.TextSize = 13; StopOverlay.BorderSizePixel = 0; StopOverlay.Visible = false
-StopOverlay.Parent = OverlayGui
-Instance.new("UICorner", StopOverlay).CornerRadius = UDim.new(0, 6)
-
-local function clickCircle(x, y, color)
-    local c = Instance.new("Frame")
-    c.Size = UDim2.new(0, 10, 0, 10); c.Position = UDim2.new(0, x - 5, 0, y - 5)
-    c.BackgroundColor3 = color or Color3.fromRGB(255, 90, 90); c.BackgroundTransparency = 0.2
-    c.BorderSizePixel = 0; c.ZIndex = 1000001; c.Parent = OverlayGui
-    Instance.new("UICorner", c).CornerRadius = UDim.new(1, 0)
-    local t1 = TweenService:Create(c, TweenInfo.new(0.4), {
-        Size = UDim2.new(0, 40, 0, 40), Position = UDim2.new(0, x - 20, 0, y - 20),
-        BackgroundTransparency = 1,
-    })
-    t1:Play(); t1.Completed:Connect(function() c:Destroy() end)
-end
-local function setFakeCursor(x, y) Cursor.Position = UDim2.new(0, x - 7, 0, y - 7) end
-
-local function drawCrosshair(x, y, color, lifetime)
-    color = color or Color3.fromRGB(255, 50, 50)
-    lifetime = lifetime or 1.5
-    local h = Instance.new("Frame")
-    h.Size = UDim2.new(0, 30, 0, 2); h.Position = UDim2.new(0, x - 15, 0, y - 1)
-    h.BackgroundColor3 = color; h.BorderSizePixel = 0; h.ZIndex = 1000002
-    h.Parent = OverlayGui
-    local v = Instance.new("Frame")
-    v.Size = UDim2.new(0, 2, 0, 30); v.Position = UDim2.new(0, x - 1, 0, y - 15)
-    v.BackgroundColor3 = color; v.BorderSizePixel = 0; v.ZIndex = 1000002
-    v.Parent = OverlayGui
-    local o = Instance.new("Frame")
-    o.Size = UDim2.new(0, 18, 0, 18); o.Position = UDim2.new(0, x - 9, 0, y - 9)
-    o.BackgroundTransparency = 1; o.ZIndex = 1000002
-    o.Parent = OverlayGui
-    Instance.new("UICorner", o).CornerRadius = UDim.new(1, 0)
-    local os_ = Instance.new("UIStroke", o)
-    os_.Color = color; os_.Thickness = 2
-    task.delay(lifetime, function()
-        h:Destroy(); v:Destroy(); o:Destroy()
+    local dragging, dragStart, startPos = false, nil, nil
+    TitleBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+           or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; dragStart = input.Position; startPos = Main.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
     end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+           or input.UserInputType == Enum.UserInputType.Touch) then
+            local d = input.Position - dragStart
+            Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X,
+                                      startPos.Y.Scale, startPos.Y.Offset + d.Y)
+        end
+    end)
+
+    Chrono = Instance.new("TextLabel")
+    Chrono.Size = UDim2.new(1, -20, 0, 34); Chrono.Position = UDim2.new(0, 10, 0, 36)
+    Chrono.BackgroundColor3 = Color3.fromRGB(12, 12, 18); Chrono.Text = "00:00.000"
+    Chrono.TextColor3 = Color3.fromRGB(100, 255, 120); Chrono.Font = Enum.Font.Code
+    Chrono.TextSize = 18; Chrono.Parent = Main
+    Instance.new("UICorner", Chrono).CornerRadius = UDim.new(0, 4)
+
+    RecDot = Instance.new("Frame")
+    RecDot.Size = UDim2.new(0, 12, 0, 12); RecDot.Position = UDim2.new(0, 18, 0, 47)
+    RecDot.BackgroundColor3 = Color3.fromRGB(220, 30, 30); RecDot.Visible = false
+    RecDot.Parent = Main
+    Instance.new("UICorner", RecDot).CornerRadius = UDim.new(1, 0)
+
+    WarnBanner = Instance.new("TextLabel")
+    WarnBanner.Size = UDim2.new(1, -20, 0, 26); WarnBanner.Position = UDim2.new(0, 10, 0, 74)
+    WarnBanner.BackgroundColor3 = Color3.fromRGB(140, 30, 30)
+    WarnBanner.TextColor3 = Color3.new(1, 1, 1); WarnBanner.Font = Enum.Font.GothamBold
+    WarnBanner.TextSize = 10; WarnBanner.TextWrapped = true; WarnBanner.Visible = false
+    WarnBanner.Parent = Main
+    Instance.new("UICorner", WarnBanner).CornerRadius = UDim.new(0, 4)
+
+    if not hasFS then
+        WarnBanner.Text = "⚠ Sin FS: memoria. Usa 📤/📋 entre juegos."
+        WarnBanner.Visible = true
+    elseif not isSharedFolder then
+        WarnBanner.BackgroundColor3 = Color3.fromRGB(140, 90, 20)
+        WarnBanner.Text = "⚠ Carpeta per-game. Usa 📤/📋 entre juegos."
+        WarnBanner.Visible = true
+    end
+
+    NameBox = Instance.new("TextBox")
+    NameBox.Size = UDim2.new(1, -20, 0, 30)
+    NameBox.Position = UDim2.new(0, 10, 0, (hasFS and isSharedFolder) and 78 or 104)
+    NameBox.BackgroundColor3 = Color3.fromRGB(40, 40, 52); NameBox.Text = ""
+    NameBox.PlaceholderText = "Nombre (vacío = Rec_HHMMSS)"
+    NameBox.TextColor3 = Color3.fromRGB(220, 220, 220)
+    NameBox.PlaceholderColor3 = Color3.fromRGB(140, 140, 160)
+    NameBox.Font = Enum.Font.Gotham; NameBox.TextSize = 13
+    NameBox.ClearTextOnFocus = false; NameBox.Parent = Main
+    Instance.new("UICorner", NameBox).CornerRadius = UDim.new(0, 4)
+
+    local function mkBtn(txt, col, x, y, w, h)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(0, w, 0, h or 32); b.Position = UDim2.new(0, x, 0, y)
+        b.BackgroundColor3 = col; b.Text = txt; b.TextColor3 = Color3.new(1, 1, 1)
+        b.Font = Enum.Font.GothamBold; b.TextSize = 12; b.BorderSizePixel = 0
+        b.Parent = Main
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
+        return b
+    end
+
+    local btnY = (hasFS and isSharedFolder) and 116 or 142
+    BtnRecord = mkBtn("● Grabar",     Color3.fromRGB(180, 50, 50),  10, btnY, 92)
+    BtnPlay   = mkBtn("▶ Reproducir", Color3.fromRGB(50, 130, 70),  107, btnY, 100)
+    BtnStop   = mkBtn("■ Detener",    Color3.fromRGB(90, 90, 110),  212, btnY, 80)
+    BtnLoop   = mkBtn("Loop: OFF",    Color3.fromRGB(60, 60, 80),   297, btnY, 93)
+
+    local autoY = btnY + 40
+    BtnAuto = mkBtn("Auto: OFF", Color3.fromRGB(60, 60, 80), 10, autoY, 92)
+    PathBox = Instance.new("TextBox")
+    PathBox.Size = UDim2.new(0, 190, 0, 32); PathBox.Position = UDim2.new(0, 107, 0, autoY)
+    PathBox.BackgroundColor3 = Color3.fromRGB(40, 40, 52)
+    PathBox.Text = "GameUI.FinalUI.Content.PlayAgain"
+    PathBox.TextColor3 = Color3.fromRGB(220, 220, 220)
+    PathBox.Font = Enum.Font.Gotham; PathBox.TextSize = 11
+    PathBox.TextXAlignment = Enum.TextXAlignment.Left; PathBox.ClearTextOnFocus = false
+    PathBox.Parent = Main
+    Instance.new("UICorner", PathBox).CornerRadius = UDim.new(0, 4)
+    BtnTestClick = mkBtn("Probar", Color3.fromRGB(80, 100, 140), 303, autoY, 87)
+
+    local autoY2 = autoY + 38
+    local function mkMiniBtn(txt, col, x, w)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(0, w, 0, 26); b.Position = UDim2.new(0, x, 0, autoY2)
+        b.BackgroundColor3 = col; b.Text = txt; b.TextColor3 = Color3.new(1, 1, 1)
+        b.Font = Enum.Font.GothamBold; b.TextSize = 10; b.BorderSizePixel = 0
+        b.Parent = Main
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
+        return b
+    end
+    BtnInspect      = mkMiniBtn("🔍 Insp",   Color3.fromRGB(80, 80, 110),  10, 55)
+    BtnMark         = mkMiniBtn("📍 Mapa",   Color3.fromRGB(80, 120, 120), 70, 65)
+    BtnCapture      = mkMiniBtn("🎯 Capt",   Color3.fromRGB(120, 100, 180),140, 55)
+    ForceMouseBtn   = mkMiniBtn("🖱 Forz",   Color3.fromRGB(60, 60, 80),   200, 60)
+    MovToggleBtn    = mkMiniBtn("🏃 Mov ON", Color3.fromRGB(50, 130, 70),  265, 120)
+
+    local fixedY = autoY2 + 30
+    FixedClickBtn = Instance.new("TextButton")
+    FixedClickBtn.Size = UDim2.new(1, -20, 0, 24)
+    FixedClickBtn.Position = UDim2.new(0, 10, 0, fixedY)
+    FixedClickBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+    FixedClickBtn.Text = "🎯 Vigilar botón → click en (" .. FIXED_CLICK_X .. "," .. FIXED_CLICK_Y .. "): OFF"
+    FixedClickBtn.TextColor3 = Color3.new(1, 1, 1)
+    FixedClickBtn.Font = Enum.Font.GothamBold
+    FixedClickBtn.TextSize = 11
+    FixedClickBtn.BorderSizePixel = 0
+    FixedClickBtn.Parent = Main
+    Instance.new("UICorner", FixedClickBtn).CornerRadius = UDim.new(0, 4)
+
+    local ListHeader = Instance.new("Frame")
+    ListHeader.Size = UDim2.new(1, -20, 0, 22); ListHeader.Position = UDim2.new(0, 10, 0, fixedY + 28)
+    ListHeader.BackgroundTransparency = 1; ListHeader.Parent = Main
+
+    ListHeaderLbl = Instance.new("TextLabel")
+    ListHeaderLbl.Size = UDim2.new(1, -250, 1, 0); ListHeaderLbl.Position = UDim2.new(0, 4, 0, 0)
+    ListHeaderLbl.BackgroundTransparency = 1; ListHeaderLbl.Text = "Grabaciones guardadas"
+    ListHeaderLbl.TextColor3 = Color3.fromRGB(180, 180, 210)
+    ListHeaderLbl.Font = Enum.Font.GothamBold; ListHeaderLbl.TextSize = 12
+    ListHeaderLbl.TextXAlignment = Enum.TextXAlignment.Left; ListHeaderLbl.Parent = ListHeader
+
+    local function mkHdrBtn(txt, col, x)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(0, 40, 1, 0); b.Position = UDim2.new(1, x, 0, 0)
+        b.BackgroundColor3 = col; b.Text = txt; b.TextColor3 = Color3.new(1, 1, 1)
+        b.Font = Enum.Font.GothamBold; b.TextSize = 11; b.BorderSizePixel = 0
+        b.Parent = ListHeader
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
+        return b
+    end
+    ImportBtn    = mkHdrBtn("📥", Color3.fromRGB(50, 100, 150), -216)
+    OpenFileBtn  = mkHdrBtn("📂", Color3.fromRGB(120, 120, 60), -172)
+    PasteBtn     = mkHdrBtn("📋", Color3.fromRGB(120, 100, 180), -128)
+    ExportAllBtn = mkHdrBtn("📤", Color3.fromRGB(50, 130, 80),  -84)
+    RefreshBtn   = mkHdrBtn("🔄", Color3.fromRGB(60, 60, 80),   -40)
+
+    local listY = fixedY + 54
+    local ListFrame = Instance.new("Frame")
+    ListFrame.Size = UDim2.new(1, -20, 1, -(listY + 36))
+    ListFrame.Position = UDim2.new(0, 10, 0, listY)
+    ListFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 18); ListFrame.Parent = Main
+    Instance.new("UICorner", ListFrame).CornerRadius = UDim.new(0, 4)
+
+    Scrolling = Instance.new("ScrollingFrame")
+    Scrolling.Size = UDim2.new(1, 0, 1, 0)
+    Scrolling.BackgroundTransparency = 1; Scrolling.BorderSizePixel = 0
+    Scrolling.ScrollBarThickness = 6; Scrolling.CanvasSize = UDim2.new(0, 0, 0, 0)
+    Scrolling.Parent = ListFrame
+
+    local ListLayout = Instance.new("UIListLayout")
+    ListLayout.Padding = UDim.new(0, 4); ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    ListLayout.Parent = Scrolling
+    ListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        Scrolling.CanvasSize = UDim2.new(0, 0, 0, ListLayout.AbsoluteContentSize.Y + 8)
+    end)
+
+    Status = Instance.new("TextLabel")
+    Status.Size = UDim2.new(1, -120, 0, 20); Status.Position = UDim2.new(0, 12, 1, -26)
+    Status.BackgroundTransparency = 1; Status.Text = ""
+    Status.TextColor3 = Color3.fromRGB(180, 180, 210); Status.Font = Enum.Font.Gotham
+    Status.TextSize = 11; Status.TextXAlignment = Enum.TextXAlignment.Left; Status.Parent = Main
+
+    PlatformBadge = Instance.new("TextLabel")
+    PlatformBadge.Size = UDim2.new(0, 100, 0, 20); PlatformBadge.Position = UDim2.new(1, -112, 1, -26)
+    PlatformBadge.BackgroundTransparency = 1; PlatformBadge.Font = Enum.Font.GothamBold
+    PlatformBadge.TextSize = 10; PlatformBadge.TextXAlignment = Enum.TextXAlignment.Right
+    PlatformBadge.Parent = Main
+    if isMobileMode then
+        PlatformBadge.Text = "📱 Móvil"
+        PlatformBadge.TextColor3 = Color3.fromRGB(100, 220, 150)
+    elseif TouchEnabled then
+        PlatformBadge.Text = "🖥️📱 Mixto"
+        PlatformBadge.TextColor3 = Color3.fromRGB(220, 200, 100)
+    else
+        PlatformBadge.Text = "🖥️ PC"
+        PlatformBadge.TextColor3 = Color3.fromRGB(150, 160, 240)
+    end
+
+    OverlayGui = Instance.new("ScreenGui")
+    OverlayGui.Name = "MacroRec_Overlay"; OverlayGui.ResetOnSpawn = false
+    OverlayGui.IgnoreGuiInset = true; OverlayGui.DisplayOrder = 1000000
+    pcall(function() OverlayGui.Parent = guiParent end)
+    if not OverlayGui.Parent then OverlayGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+
+    FixedMarker = Instance.new("Frame")
+    FixedMarker.Size = UDim2.new(0, 16, 0, 16)
+    FixedMarker.Position = UDim2.new(0, FIXED_CLICK_X - 8, 0, FIXED_CLICK_Y - 8)
+    FixedMarker.BackgroundColor3 = Color3.fromRGB(255, 200, 50)
+    FixedMarker.BackgroundTransparency = 0.35
+    FixedMarker.BorderSizePixel = 0
+    FixedMarker.ZIndex = 1000000
+    FixedMarker.Visible = false
+    FixedMarker.Parent = OverlayGui
+    Instance.new("UICorner", FixedMarker).CornerRadius = UDim.new(1, 0)
+    local fixedMarkerStroke = Instance.new("UIStroke", FixedMarker)
+    fixedMarkerStroke.Color = Color3.fromRGB(255, 200, 50)
+    fixedMarkerStroke.Thickness = 2
+
+    Cursor = Instance.new("Frame")
+    Cursor.Size = UDim2.new(0, 14, 0, 14); Cursor.BackgroundColor3 = Color3.fromRGB(0, 255, 150)
+    Cursor.BackgroundTransparency = 0.35; Cursor.BorderSizePixel = 0; Cursor.Visible = false
+    Cursor.ZIndex = 1000000; Cursor.Parent = OverlayGui
+    Instance.new("UICorner", Cursor).CornerRadius = UDim.new(1, 0)
+    local CursorStroke = Instance.new("UIStroke", Cursor)
+    CursorStroke.Color = Color3.fromRGB(0, 255, 150); CursorStroke.Thickness = 1
+
+    KeysLabel = Instance.new("TextLabel")
+    KeysLabel.Size = UDim2.new(0, 260, 0, 24); KeysLabel.Position = UDim2.new(0, 20, 1, -46)
+    KeysLabel.BackgroundColor3 = Color3.fromRGB(0, 0, 0); KeysLabel.BackgroundTransparency = 0.4
+    KeysLabel.Text = ""; KeysLabel.TextColor3 = Color3.fromRGB(0, 255, 150)
+    KeysLabel.Font = Enum.Font.Code; KeysLabel.TextSize = 14
+    KeysLabel.TextXAlignment = Enum.TextXAlignment.Left; KeysLabel.Visible = false
+    KeysLabel.Parent = OverlayGui
+
+    StopOverlay = Instance.new("TextButton")
+    StopOverlay.Size = UDim2.new(0, 130, 0, 34); StopOverlay.Position = UDim2.new(1, -150, 0, 20)
+    StopOverlay.BackgroundColor3 = Color3.fromRGB(190, 50, 50); StopOverlay.Text = "■ STOP (F10)"
+    StopOverlay.TextColor3 = Color3.new(1, 1, 1); StopOverlay.Font = Enum.Font.GothamBold
+    StopOverlay.TextSize = 13; StopOverlay.BorderSizePixel = 0; StopOverlay.Visible = false
+    StopOverlay.Parent = OverlayGui
+    Instance.new("UICorner", StopOverlay).CornerRadius = UDim.new(0, 6)
 end
 
 --==================================================================
@@ -579,7 +548,7 @@ local function scalePoint(x, y)
 end
 
 --==================================================================
---  MINIMIZAR VENTANA AL REPRODUCIR
+--  MINIMIZAR VENTANA
 --==================================================================
 local savedWindow = nil
 
@@ -624,7 +593,7 @@ local function restoreWindow()
             d:SetAttribute("_MRVisSaved", nil)
         end
     end
-    Title.Text = "● Macro Recorder v8.5.1"
+    Title.Text = "● Macro Recorder v8.5.2"
     CloseBtn.Visible = true
 end
 
@@ -659,93 +628,138 @@ local function updateGuiScale()
 end
 
 --==================================================================
---  MODAL
+--  EFECTOS OVERLAY
 --==================================================================
-local PMBackdrop = Instance.new("Frame")
-PMBackdrop.Size = UDim2.new(1, 0, 1, 0); PMBackdrop.BackgroundColor3 = Color3.new(0, 0, 0)
-PMBackdrop.BackgroundTransparency = 0.5; PMBackdrop.BorderSizePixel = 0
-PMBackdrop.Visible = false; PMBackdrop.ZIndex = 49; PMBackdrop.Active = true
-PMBackdrop.Parent = ScreenGui
-
-local PasteModal = Instance.new("Frame")
-PasteModal.Size = UDim2.new(0, 540, 0, 470)
-PasteModal.Position = UDim2.new(0.5, -270, 0.5, -235)
-PasteModal.BackgroundColor3 = Color3.fromRGB(28, 28, 36); PasteModal.BorderSizePixel = 0
-PasteModal.Visible = false; PasteModal.ZIndex = 50; PasteModal.Parent = ScreenGui
-Instance.new("UICorner", PasteModal).CornerRadius = UDim.new(0, 8)
-local PMStroke = Instance.new("UIStroke", PasteModal)
-PMStroke.Color = Color3.fromRGB(120, 100, 180); PMStroke.Thickness = 2
-
-local PMTitle = Instance.new("TextLabel")
-PMTitle.Size = UDim2.new(1, -20, 0, 28); PMTitle.Position = UDim2.new(0, 10, 0, 8)
-PMTitle.BackgroundTransparency = 1; PMTitle.Text = "📋 Cargar output (JSON)"
-PMTitle.TextColor3 = Color3.fromRGB(210, 210, 255); PMTitle.Font = Enum.Font.GothamBold
-PMTitle.TextSize = 14; PMTitle.TextXAlignment = Enum.TextXAlignment.Left
-PMTitle.ZIndex = 51; PMTitle.Parent = PasteModal
-
-local PMHelp = Instance.new("TextLabel")
-PMHelp.Size = UDim2.new(1, -20, 0, 18); PMHelp.Position = UDim2.new(0, 10, 0, 34)
-PMHelp.BackgroundTransparency = 1
-PMHelp.Text = "Pega el JSON. Para archivos grandes usa 📂 en la lista."
-PMHelp.TextColor3 = Color3.fromRGB(140, 140, 170); PMHelp.Font = Enum.Font.Gotham
-PMHelp.TextSize = 11; PMHelp.TextXAlignment = Enum.TextXAlignment.Left
-PMHelp.ZIndex = 51; PMHelp.Parent = PasteModal
-
-local PMBox = Instance.new("TextBox")
-PMBox.Size = UDim2.new(1, -20, 0, 320); PMBox.Position = UDim2.new(0, 10, 0, 56)
-PMBox.BackgroundColor3 = Color3.fromRGB(16, 16, 22); PMBox.Text = ""
-PMBox.PlaceholderText = '{"name":"mi_macro","events":[...],"duration":12.3}'
-PMBox.TextColor3 = Color3.fromRGB(200, 200, 220)
-PMBox.PlaceholderColor3 = Color3.fromRGB(90, 90, 110)
-PMBox.Font = Enum.Font.Code; PMBox.TextSize = 11
-PMBox.MultiLine = true; PMBox.TextWrapped = true
-PMBox.TextXAlignment = Enum.TextXAlignment.Left
-PMBox.TextYAlignment = Enum.TextYAlignment.Top
-PMBox.ClearTextOnFocus = false
-PMBox.ZIndex = 51; PMBox.Parent = PasteModal
-Instance.new("UICorner", PMBox).CornerRadius = UDim.new(0, 4)
-
-local PMCount = Instance.new("TextLabel")
-PMCount.Size = UDim2.new(1, -20, 0, 16); PMCount.Position = UDim2.new(0, 10, 0, 380)
-PMCount.BackgroundTransparency = 1; PMCount.Text = "0 bytes"
-PMCount.TextColor3 = Color3.fromRGB(140, 140, 170); PMCount.Font = Enum.Font.Gotham
-PMCount.TextSize = 10; PMCount.TextXAlignment = Enum.TextXAlignment.Left
-PMCount.ZIndex = 51; PMCount.Parent = PasteModal
-
-PMBox:GetPropertyChangedSignal("Text"):Connect(function()
-    PMCount.Text = #PMBox.Text .. " bytes"
-end)
-
-local PMFromClip = Instance.new("TextButton")
-PMFromClip.Size = UDim2.new(0, 140, 0, 32); PMFromClip.Position = UDim2.new(0, 10, 1, -42)
-PMFromClip.BackgroundColor3 = Color3.fromRGB(50, 100, 150); PMFromClip.Text = "📥 Del portapapeles"
-PMFromClip.TextColor3 = Color3.new(1, 1, 1); PMFromClip.Font = Enum.Font.GothamBold
-PMFromClip.TextSize = 11; PMFromClip.BorderSizePixel = 0
-PMFromClip.ZIndex = 51; PMFromClip.Parent = PasteModal
-Instance.new("UICorner", PMFromClip).CornerRadius = UDim.new(0, 4)
-
-local PMCancel = Instance.new("TextButton")
-PMCancel.Size = UDim2.new(0, 90, 0, 32); PMCancel.Position = UDim2.new(1, -204, 1, -42)
-PMCancel.BackgroundColor3 = Color3.fromRGB(90, 90, 110); PMCancel.Text = "Cancelar"
-PMCancel.TextColor3 = Color3.new(1, 1, 1); PMCancel.Font = Enum.Font.GothamBold
-PMCancel.TextSize = 12; PMCancel.BorderSizePixel = 0
-PMCancel.ZIndex = 51; PMCancel.Parent = PasteModal
-Instance.new("UICorner", PMCancel).CornerRadius = UDim.new(0, 4)
-
-local PMCargar = Instance.new("TextButton")
-PMCargar.Size = UDim2.new(0, 100, 0, 32); PMCargar.Position = UDim2.new(1, -108, 1, -42)
-PMCargar.BackgroundColor3 = Color3.fromRGB(50, 150, 80); PMCargar.Text = "Cargar"
-PMCargar.TextColor3 = Color3.new(1, 1, 1); PMCargar.Font = Enum.Font.GothamBold
-PMCargar.TextSize = 12; PMCargar.BorderSizePixel = 0
-PMCargar.ZIndex = 51; PMCargar.Parent = PasteModal
-Instance.new("UICorner", PMCargar).CornerRadius = UDim.new(0, 4)
-
-local function openPasteModal()
-    PMBox.Text = ""; PMCount.Text = "0 bytes"
-    PMBackdrop.Visible = true; PasteModal.Visible = true
+local function clickCircle(x, y, color)
+    local c = Instance.new("Frame")
+    c.Size = UDim2.new(0, 10, 0, 10); c.Position = UDim2.new(0, x - 5, 0, y - 5)
+    c.BackgroundColor3 = color or Color3.fromRGB(255, 90, 90); c.BackgroundTransparency = 0.2
+    c.BorderSizePixel = 0; c.ZIndex = 1000001; c.Parent = OverlayGui
+    Instance.new("UICorner", c).CornerRadius = UDim.new(1, 0)
+    local t1 = TweenService:Create(c, TweenInfo.new(0.4), {
+        Size = UDim2.new(0, 40, 0, 40), Position = UDim2.new(0, x - 20, 0, y - 20),
+        BackgroundTransparency = 1,
+    })
+    t1:Play(); t1.Completed:Connect(function() c:Destroy() end)
 end
-local function closePasteModal()
-    PMBackdrop.Visible = false; PasteModal.Visible = false
+local function setFakeCursor(x, y) Cursor.Position = UDim2.new(0, x - 7, 0, y - 7) end
+
+local function drawCrosshair(x, y, color, lifetime)
+    color = color or Color3.fromRGB(255, 50, 50)
+    lifetime = lifetime or 1.5
+    local h = Instance.new("Frame")
+    h.Size = UDim2.new(0, 30, 0, 2); h.Position = UDim2.new(0, x - 15, 0, y - 1)
+    h.BackgroundColor3 = color; h.BorderSizePixel = 0; h.ZIndex = 1000002
+    h.Parent = OverlayGui
+    local v = Instance.new("Frame")
+    v.Size = UDim2.new(0, 2, 0, 30); v.Position = UDim2.new(0, x - 1, 0, y - 15)
+    v.BackgroundColor3 = color; v.BorderSizePixel = 0; v.ZIndex = 1000002
+    v.Parent = OverlayGui
+    local o = Instance.new("Frame")
+    o.Size = UDim2.new(0, 18, 0, 18); o.Position = UDim2.new(0, x - 9, 0, y - 9)
+    o.BackgroundTransparency = 1; o.ZIndex = 1000002
+    o.Parent = OverlayGui
+    Instance.new("UICorner", o).CornerRadius = UDim.new(1, 0)
+    local os_ = Instance.new("UIStroke", o)
+    os_.Color = color; os_.Thickness = 2
+    task.delay(lifetime, function()
+        h:Destroy(); v:Destroy(); o:Destroy()
+    end)
+end
+
+--==================================================================
+--  MODAL (Encapsulado)
+--==================================================================
+local PMBackdrop, PasteModal, PMBox, PMCount, PMFromClip, PMCancel, PMCargar
+local openPasteModal, closePasteModal
+
+do
+    PMBackdrop = Instance.new("Frame")
+    PMBackdrop.Size = UDim2.new(1, 0, 1, 0); PMBackdrop.BackgroundColor3 = Color3.new(0, 0, 0)
+    PMBackdrop.BackgroundTransparency = 0.5; PMBackdrop.BorderSizePixel = 0
+    PMBackdrop.Visible = false; PMBackdrop.ZIndex = 49; PMBackdrop.Active = true
+    PMBackdrop.Parent = ScreenGui
+
+    PasteModal = Instance.new("Frame")
+    PasteModal.Size = UDim2.new(0, 540, 0, 470)
+    PasteModal.Position = UDim2.new(0.5, -270, 0.5, -235)
+    PasteModal.BackgroundColor3 = Color3.fromRGB(28, 28, 36); PasteModal.BorderSizePixel = 0
+    PasteModal.Visible = false; PasteModal.ZIndex = 50; PasteModal.Parent = ScreenGui
+    Instance.new("UICorner", PasteModal).CornerRadius = UDim.new(0, 8)
+    local PMStroke = Instance.new("UIStroke", PasteModal)
+    PMStroke.Color = Color3.fromRGB(120, 100, 180); PMStroke.Thickness = 2
+
+    local PMTitle = Instance.new("TextLabel")
+    PMTitle.Size = UDim2.new(1, -20, 0, 28); PMTitle.Position = UDim2.new(0, 10, 0, 8)
+    PMTitle.BackgroundTransparency = 1; PMTitle.Text = "📋 Cargar output (JSON)"
+    PMTitle.TextColor3 = Color3.fromRGB(210, 210, 255); PMTitle.Font = Enum.Font.GothamBold
+    PMTitle.TextSize = 14; PMTitle.TextXAlignment = Enum.TextXAlignment.Left
+    PMTitle.ZIndex = 51; PMTitle.Parent = PasteModal
+
+    local PMHelp = Instance.new("TextLabel")
+    PMHelp.Size = UDim2.new(1, -20, 0, 18); PMHelp.Position = UDim2.new(0, 10, 0, 34)
+    PMHelp.BackgroundTransparency = 1
+    PMHelp.Text = "Pega el JSON. Para archivos grandes usa 📂 en la lista."
+    PMHelp.TextColor3 = Color3.fromRGB(140, 140, 170); PMHelp.Font = Enum.Font.Gotham
+    PMHelp.TextSize = 11; PMHelp.TextXAlignment = Enum.TextXAlignment.Left
+    PMHelp.ZIndex = 51; PMHelp.Parent = PasteModal
+
+    PMBox = Instance.new("TextBox")
+    PMBox.Size = UDim2.new(1, -20, 0, 320); PMBox.Position = UDim2.new(0, 10, 0, 56)
+    PMBox.BackgroundColor3 = Color3.fromRGB(16, 16, 22); PMBox.Text = ""
+    PMBox.PlaceholderText = '{"name":"mi_macro","events":[...],"duration":12.3}'
+    PMBox.TextColor3 = Color3.fromRGB(200, 200, 220)
+    PMBox.PlaceholderColor3 = Color3.fromRGB(90, 90, 110)
+    PMBox.Font = Enum.Font.Code; PMBox.TextSize = 11
+    PMBox.MultiLine = true; PMBox.TextWrapped = true
+    PMBox.TextXAlignment = Enum.TextXAlignment.Left
+    PMBox.TextYAlignment = Enum.TextYAlignment.Top
+    PMBox.ClearTextOnFocus = false
+    PMBox.ZIndex = 51; PMBox.Parent = PasteModal
+    Instance.new("UICorner", PMBox).CornerRadius = UDim.new(0, 4)
+
+    PMCount = Instance.new("TextLabel")
+    PMCount.Size = UDim2.new(1, -20, 0, 16); PMCount.Position = UDim2.new(0, 10, 0, 380)
+    PMCount.BackgroundTransparency = 1; PMCount.Text = "0 bytes"
+    PMCount.TextColor3 = Color3.fromRGB(140, 140, 170); PMCount.Font = Enum.Font.Gotham
+    PMCount.TextSize = 10; PMCount.TextXAlignment = Enum.TextXAlignment.Left
+    PMCount.ZIndex = 51; PMCount.Parent = PasteModal
+
+    PMBox:GetPropertyChangedSignal("Text"):Connect(function()
+        PMCount.Text = #PMBox.Text .. " bytes"
+    end)
+
+    PMFromClip = Instance.new("TextButton")
+    PMFromClip.Size = UDim2.new(0, 140, 0, 32); PMFromClip.Position = UDim2.new(0, 10, 1, -42)
+    PMFromClip.BackgroundColor3 = Color3.fromRGB(50, 100, 150); PMFromClip.Text = "📥 Del portapapeles"
+    PMFromClip.TextColor3 = Color3.new(1, 1, 1); PMFromClip.Font = Enum.Font.GothamBold
+    PMFromClip.TextSize = 11; PMFromClip.BorderSizePixel = 0
+    PMFromClip.ZIndex = 51; PMFromClip.Parent = PasteModal
+    Instance.new("UICorner", PMFromClip).CornerRadius = UDim.new(0, 4)
+
+    PMCancel = Instance.new("TextButton")
+    PMCancel.Size = UDim2.new(0, 90, 0, 32); PMCancel.Position = UDim2.new(1, -204, 1, -42)
+    PMCancel.BackgroundColor3 = Color3.fromRGB(90, 90, 110); PMCancel.Text = "Cancelar"
+    PMCancel.TextColor3 = Color3.new(1, 1, 1); PMCancel.Font = Enum.Font.GothamBold
+    PMCancel.TextSize = 12; PMCancel.BorderSizePixel = 0
+    PMCancel.ZIndex = 51; PMCancel.Parent = PasteModal
+    Instance.new("UICorner", PMCancel).CornerRadius = UDim.new(0, 4)
+
+    PMCargar = Instance.new("TextButton")
+    PMCargar.Size = UDim2.new(0, 100, 0, 32); PMCargar.Position = UDim2.new(1, -108, 1, -42)
+    PMCargar.BackgroundColor3 = Color3.fromRGB(50, 150, 80); PMCargar.Text = "Cargar"
+    PMCargar.TextColor3 = Color3.new(1, 1, 1); PMCargar.Font = Enum.Font.GothamBold
+    PMCargar.TextSize = 12; PMCargar.BorderSizePixel = 0
+    PMCargar.ZIndex = 51; PMCargar.Parent = PasteModal
+    Instance.new("UICorner", PMCargar).CornerRadius = UDim.new(0, 4)
+
+    openPasteModal = function()
+        PMBox.Text = ""; PMCount.Text = "0 bytes"
+        PMBackdrop.Visible = true; PasteModal.Visible = true
+    end
+    closePasteModal = function()
+        PMBackdrop.Visible = false; PasteModal.Visible = false
+    end
 end
 
 --==================================================================
@@ -875,7 +889,6 @@ local function writeAutoload(name)
     if ok then pcall(writefile, p, enc) end
 end
 
---============ PERSISTENCIA DEL WATCHER (v8.5.1) ============
 local function readWatcher()
     if not activeFolder then return nil end
     local p = watcherPath()
@@ -1066,7 +1079,7 @@ local function findBracket(kfs, t)
 end
 
 --==================================================================
---  CAMERA LOCK (multi-capa)
+--  CAMERA LOCK
 --==================================================================
 local function enforceCamLock()
     if not camLocked then return end
@@ -1289,7 +1302,7 @@ local function mousemoveToRoblox(targetX, targetY, maxIter)
 end
 
 --==================================================================
---  AUTO-CLICK POR PATH (PlayAgain u otro)
+--  AUTO-CLICK POR PATH
 --==================================================================
 local function resolveGuiPath(relPath)
     local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
@@ -1513,7 +1526,6 @@ local function tryFixedClick()
     end
 end
 
---============ TOGGLE DEL WATCHER (v8.5.1) ============
 local function setFixedClickActive(active, silent)
     active = active and true or false
 
@@ -1524,7 +1536,6 @@ local function setFixedClickActive(active, silent)
             if not silent then
                 Status.Text = "⚠ Escribe primero el path del botón a vigilar"
             end
-            -- Persistimos el OFF igualmente para que no quede un ON viejo
             writeWatcher(false, PathBox.Text or "")
             return false
         end
@@ -1729,111 +1740,6 @@ local function stopRecording()
     Status.Text = (okSave and "✅ " or "⚠ ") .. name .. clipMsg
     pcall(refreshList)
 end
-
-UserInputService.InputBegan:Connect(function(input, gp)
-    if not state.recording or UserInputService:GetFocusedTextBox() then return end
-    if input.KeyCode == Enum.KeyCode.F8 or input.KeyCode == Enum.KeyCode.F9
-       or input.KeyCode == Enum.KeyCode.F10 or isOverGui() then return end
-    if input.UserInputType == Enum.UserInputType.Keyboard then
-        pushEvent({ type = "keydown", key = input.KeyCode.Name })
-    elseif input.UserInputType == Enum.UserInputType.MouseButton1 then pushEvent({ type = "m1down" })
-    elseif input.UserInputType == Enum.UserInputType.MouseButton2 then pushEvent({ type = "m2down" }) end
-end)
-UserInputService.InputEnded:Connect(function(input, gp)
-    if not state.recording or UserInputService:GetFocusedTextBox() then return end
-    if input.KeyCode == Enum.KeyCode.F8 or input.KeyCode == Enum.KeyCode.F9
-       or input.KeyCode == Enum.KeyCode.F10 or isOverGui() then return end
-    if input.UserInputType == Enum.UserInputType.Keyboard then
-        pushEvent({ type = "keyup", key = input.KeyCode.Name })
-    elseif input.UserInputType == Enum.UserInputType.MouseButton1 then pushEvent({ type = "m1up" })
-    elseif input.UserInputType == Enum.UserInputType.MouseButton2 then pushEvent({ type = "m2up" }) end
-end)
-UserInputService.InputChanged:Connect(function(input)
-    if not state.recording then return end
-    if input.UserInputType == Enum.UserInputType.MouseWheel then
-        pushEvent({ type = "wheel", delta = input.Position.Z })
-    end
-end)
-
--- ====== GRABACIÓN TÁCTIL ======
-if TouchEnabled then
-    UserInputService.InputBegan:Connect(function(input, gp)
-        if input.UserInputType ~= Enum.UserInputType.Touch then return end
-        if not state.recording then return end
-        if isPointOverMainGui(input.Position.X, input.Position.Y) then return end
-        if touchMap[input] then return end
-
-        nextTouchId = nextTouchId + 1
-        local id = nextTouchId
-        touchMap[input] = { id = id, x = input.Position.X, y = input.Position.Y }
-        lastTouchPositions[id] = Vector2.new(input.Position.X, input.Position.Y)
-        pushEvent({ type = "touchdown", x = input.Position.X, y = input.Position.Y, id = id })
-    end)
-
-    UserInputService.InputChanged:Connect(function(input, gp)
-        if input.UserInputType ~= Enum.UserInputType.Touch then return end
-        if not state.recording then return end
-        local info = touchMap[input]
-        if not info then return end
-        if isPointOverMainGui(input.Position.X, input.Position.Y) then return end
-
-        local newPos = Vector2.new(input.Position.X, input.Position.Y)
-        local last = lastTouchPositions[info.id]
-        if last and (newPos - last).Magnitude < REC_TOUCH_MIN_PIXELS then return end
-        lastTouchPositions[info.id] = newPos
-
-        info.x, info.y = newPos.X, newPos.Y
-        pushEvent({ type = "touchmove", x = newPos.X, y = newPos.Y, id = info.id })
-    end)
-
-    UserInputService.InputEnded:Connect(function(input, gp)
-        if input.UserInputType ~= Enum.UserInputType.Touch then return end
-        if not state.recording then return end
-        local info = touchMap[input]
-        if not info then return end
-
-        touchMap[input] = nil
-        lastTouchPositions[info.id] = nil
-        pushEvent({ type = "touchup", x = input.Position.X, y = input.Position.Y, id = info.id })
-    end)
-end
-
-RunService.RenderStepped:Connect(function()
-    if state.recording then
-        Chrono.Text = fmtDuration(os.clock() - state.recordStart)
-        if MouseEnabled then
-            local mp = UserInputService:GetMouseLocation()
-            if (mp - lastMousePos).Magnitude > REC_MOUSE_MIN_PIXELS then
-                pushEvent({ type = "mouse", x = mp.X, y = mp.Y }); lastMousePos = mp
-            end
-        end
-        local cam = workspace.CurrentCamera
-        if cam then
-            local cfChanged  = cframesDiffer(lastCamCFrame, cam.CFrame, REC_CAM_POS_THRESH, REC_CAM_ROT_THRESH)
-            local fovChanged = lastCamFOV == nil or math.abs(lastCamFOV - cam.FieldOfView) > REC_CAM_FOV_THRESH
-            if cfChanged or fovChanged then
-                pushEvent({ type = "cam", cframe = { cam.CFrame:GetComponents() }, fov = cam.FieldOfView })
-                lastCamCFrame = cam.CFrame
-                lastCamFOV    = cam.FieldOfView
-            end
-        end
-        if state.moveEnabled then
-            local char = LocalPlayer.Character
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                if cframesDiffer(lastHrpCFrame, hrp.CFrame, REC_HRP_POS_THRESH, REC_HRP_ROT_THRESH) then
-                    pushEvent({ type = "hrp", cframe = { hrp.CFrame:GetComponents() } })
-                    lastHrpCFrame = hrp.CFrame
-                end
-            end
-        end
-    elseif state.playing then
-        if state.playStart then Chrono.Text = fmtDuration(os.clock() - state.playStart) end
-    else
-        Chrono.Text = "00:00.000"
-    end
-    pcall(tryFixedClick)
-end)
 
 --==================================================================
 --  REPRODUCCIÓN
@@ -2194,7 +2100,7 @@ local function playRecording(events, name, looped, rec)
 end
 
 --==================================================================
---  LISTA
+--  LISTA (Encapsulada)
 --==================================================================
 function refreshList()
     for _, c in ipairs(Scrolling:GetChildren()) do
@@ -2305,197 +2211,307 @@ function refreshList()
 end
 
 --==================================================================
---  CONEXIONES
+--  CONEXIONES (Encapsuladas en do...end)
 --==================================================================
-BtnRecord.MouseButton1Click:Connect(function()
-    if state.recording then stopRecording() else startRecording() end
-end)
-BtnPlay.MouseButton1Click:Connect(function()
-    local name = NameBox.Text:gsub("[^%w_%-]", "_")
-    if name == "" then Status.Text = "Escribe un nombre."; return end
-    local r = loadRecording(name)
-    if not r or not r.events then Status.Text = "No existe: " .. name; return end
-    playRecording(r.events, name, state.looped, r)
-end)
-BtnStop.MouseButton1Click:Connect(function()
-    if state.recording then stopRecording() end
-    if state.playing then stopPlayback() end
-end)
-BtnLoop.MouseButton1Click:Connect(function()
-    state.looped = not state.looped
-    BtnLoop.Text = "Loop: " .. (state.looped and "ON" or "OFF")
-    BtnLoop.BackgroundColor3 = state.looped and Color3.fromRGB(50, 130, 70) or Color3.fromRGB(60, 60, 80)
-end)
-BtnAuto.MouseButton1Click:Connect(function()
-    state.autoClick = not state.autoClick
-    BtnAuto.Text = "Auto: " .. (state.autoClick and "ON" or "OFF")
-    BtnAuto.BackgroundColor3 = state.autoClick and Color3.fromRGB(50, 130, 70) or Color3.fromRGB(60, 60, 80)
-end)
-BtnTestClick.MouseButton1Click:Connect(function() task.spawn(clickPlayAgain) end)
-BtnInspect.MouseButton1Click:Connect(inspectPath)
-BtnMark.MouseButton1Click:Connect(markPath)
-BtnCapture.MouseButton1Click:Connect(function()
-    if captureMode then captureMode = false; Status.Text = "🎯 Cancelado"
-    else startCapture() end
-end)
-ForceMouseBtn.MouseButton1Click:Connect(function()
-    state.forceMouse = not state.forceMouse
-    ForceMouseBtn.BackgroundColor3 = state.forceMouse
-        and Color3.fromRGB(50, 130, 70) or Color3.fromRGB(60, 60, 80)
-    Status.Text = state.forceMouse and "🖱 Forzar mouse ON" or "Método auto"
-end)
-MovToggleBtn.MouseButton1Click:Connect(function()
-    state.moveEnabled = not state.moveEnabled
-    if state.moveEnabled then
-        MovToggleBtn.Text = "🏃 Mov ON"
-        MovToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 130, 70)
-        Status.Text = "🏃 Movimiento del personaje ON"
-    else
-        MovToggleBtn.Text = "🏃 Mov OFF"
-        MovToggleBtn.BackgroundColor3 = Color3.fromRGB(90, 60, 60)
-        Status.Text = "Movimiento del personaje OFF (solo teclas/touch)"
-    end
-end)
+do
+    BtnRecord.MouseButton1Click:Connect(function()
+        if state.recording then stopRecording() else startRecording() end
+    end)
+    BtnPlay.MouseButton1Click:Connect(function()
+        local name = NameBox.Text:gsub("[^%w_%-]", "_")
+        if name == "" then Status.Text = "Escribe un nombre."; return end
+        local r = loadRecording(name)
+        if not r or not r.events then Status.Text = "No existe: " .. name; return end
+        playRecording(r.events, name, state.looped, r)
+    end)
+    BtnStop.MouseButton1Click:Connect(function()
+        if state.recording then stopRecording() end
+        if state.playing then stopPlayback() end
+    end)
+    BtnLoop.MouseButton1Click:Connect(function()
+        state.looped = not state.looped
+        BtnLoop.Text = "Loop: " .. (state.looped and "ON" or "OFF")
+        BtnLoop.BackgroundColor3 = state.looped and Color3.fromRGB(50, 130, 70) or Color3.fromRGB(60, 60, 80)
+    end)
+    BtnAuto.MouseButton1Click:Connect(function()
+        state.autoClick = not state.autoClick
+        BtnAuto.Text = "Auto: " .. (state.autoClick and "ON" or "OFF")
+        BtnAuto.BackgroundColor3 = state.autoClick and Color3.fromRGB(50, 130, 70) or Color3.fromRGB(60, 60, 80)
+    end)
+    BtnTestClick.MouseButton1Click:Connect(function() task.spawn(clickPlayAgain) end)
+    BtnInspect.MouseButton1Click:Connect(inspectPath)
+    BtnMark.MouseButton1Click:Connect(markPath)
+    BtnCapture.MouseButton1Click:Connect(function()
+        if captureMode then captureMode = false; Status.Text = "🎯 Cancelado"
+        else startCapture() end
+    end)
+    ForceMouseBtn.MouseButton1Click:Connect(function()
+        state.forceMouse = not state.forceMouse
+        ForceMouseBtn.BackgroundColor3 = state.forceMouse
+            and Color3.fromRGB(50, 130, 70) or Color3.fromRGB(60, 60, 80)
+        Status.Text = state.forceMouse and "🖱 Forzar mouse ON" or "Método auto"
+    end)
+    MovToggleBtn.MouseButton1Click:Connect(function()
+        state.moveEnabled = not state.moveEnabled
+        if state.moveEnabled then
+            MovToggleBtn.Text = "🏃 Mov ON"
+            MovToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 130, 70)
+            Status.Text = "🏃 Movimiento del personaje ON"
+        else
+            MovToggleBtn.Text = "🏃 Mov OFF"
+            MovToggleBtn.BackgroundColor3 = Color3.fromRGB(90, 60, 60)
+            Status.Text = "Movimiento del personaje OFF (solo teclas/touch)"
+        end
+    end)
 
-FixedClickBtn.MouseButton1Click:Connect(function()
-    setFixedClickActive(not state.fixedClickActive)
-end)
+    FixedClickBtn.MouseButton1Click:Connect(function()
+        setFixedClickActive(not state.fixedClickActive)
+    end)
 
--- Persistir cambios del path con el watcher activo
-PathBox:GetPropertyChangedSignal("Text"):Connect(function()
-    if state.fixedClickActive then
-        writeWatcher(true, PathBox.Text or "")
-    end
-end)
+    PathBox:GetPropertyChangedSignal("Text"):Connect(function()
+        if state.fixedClickActive then
+            writeWatcher(true, PathBox.Text or "")
+        end
+    end)
 
-ImportBtn.MouseButton1Click:Connect(function()
-    if not hasGetClipboard then Status.Text = "❌ getclipboard no disponible"; return end
-    local ok, raw = pcall(getclipboard)
-    if not ok or not raw or raw == "" then Status.Text = "❌ Portapapeles vacío"; return end
-    local saved, skipped, err, fname, method = importFromText(raw)
-    if err then Status.Text = "❌ " .. err:sub(1, 60); return end
-    if fname and saved == 1 then NameBox.Text = fname end
-    Status.Text = "📥 " .. saved .. " (" .. skipped .. ") via " .. tostring(method or "?")
-    refreshList()
-end)
+    ImportBtn.MouseButton1Click:Connect(function()
+        if not hasGetClipboard then Status.Text = "❌ getclipboard no disponible"; return end
+        local ok, raw = pcall(getclipboard)
+        if not ok or not raw or raw == "" then Status.Text = "❌ Portapapeles vacío"; return end
+        local saved, skipped, err, fname, method = importFromText(raw)
+        if err then Status.Text = "❌ " .. err:sub(1, 60); return end
+        if fname and saved == 1 then NameBox.Text = fname end
+        Status.Text = "📥 " .. saved .. " (" .. skipped .. ") via " .. tostring(method or "?")
+        refreshList()
+    end)
 
-OpenFileBtn.MouseButton1Click:Connect(function()
-    if not hasFS then Status.Text = "❌ executor sin FS"; return end
-    local fname = NameBox.Text:gsub("[^%w_%-]", "_")
-    if fname == "" then
-        local files = {}
-        if activeFolder and type(listfiles) == "function" then
-            local okL, list = pcall(listfiles, activeFolder)
-            if okL and list then
-                for _, f in ipairs(list) do
-                    local base = tostring(f):match("([^/\\]+)%.json$")
-                    if base and base ~= "index" and base ~= "autoload" and base ~= "watcher" then
-                        table.insert(files, base)
+    OpenFileBtn.MouseButton1Click:Connect(function()
+        if not hasFS then Status.Text = "❌ executor sin FS"; return end
+        local fname = NameBox.Text:gsub("[^%w_%-]", "_")
+        if fname == "" then
+            local files = {}
+            if activeFolder and type(listfiles) == "function" then
+                local okL, list = pcall(listfiles, activeFolder)
+                if okL and list then
+                    for _, f in ipairs(list) do
+                        local base = tostring(f):match("([^/\\]+)%.json$")
+                        if base and base ~= "index" and base ~= "autoload" and base ~= "watcher" then
+                            table.insert(files, base)
+                        end
                     end
                 end
             end
+            if #files == 0 then Status.Text = "❌ No hay .json en " .. tostring(activeFolder)
+            else Status.Text = "📂 Escribe uno: " .. table.concat(files, ", "):sub(1, 80) end
+            return
         end
-        if #files == 0 then Status.Text = "❌ No hay .json en " .. tostring(activeFolder)
-        else Status.Text = "📂 Escribe uno: " .. table.concat(files, ", "):sub(1, 80) end
-        return
-    end
-    local target = activeFolder .. fname .. ".json"
-    if not isfile(target) then
-        Status.Text = "❌ No existe " .. target
-        print("[MacroRec] No existe: " .. target)
-        return
-    end
-    local ok, raw = pcall(readfile, target)
-    if not ok or not raw then Status.Text = "❌ readfile falló"; return end
-    print("[MacroRec] 📂 abriendo " .. target .. " (" .. #raw .. " bytes)")
-    local saved, skipped, err, first, method = importFromText(raw)
-    if err then Status.Text = "❌ " .. err:sub(1, 60); print("[MacroRec] " .. err); return end
-    if first and saved == 1 then NameBox.Text = first end
-    Status.Text = "📂 " .. saved .. " (" .. skipped .. ") via " .. tostring(method or "?")
-    refreshList()
-end)
-
-PasteBtn.MouseButton1Click:Connect(function() openPasteModal() end)
-
-ExportAllBtn.MouseButton1Click:Connect(function()
-    local all = {}
-    for _, name in ipairs(getAllNames()) do
-        local r = loadRecording(name); if r then table.insert(all, r) end
-    end
-    if #all == 0 then Status.Text = "❌ Nada"; return end
-    local clipFn = getClipboardSetFn()
-    if not clipFn then
-        Status.Text = "⚠ sin clipboard — en consola"
-        print("=== EXPORT ALL ==="); print(jsonEncode(all)); print("=== FIN ===")
-        return
-    end
-    local okE, enc = pcall(jsonEncode, all)
-    if not okE then Status.Text = "❌ encode"; return end
-    local okC = pcall(clipFn, enc)
-    if okC then Status.Text = "📤 " .. #all .. " copiadas (" .. #enc .. "B)"
-    else Status.Text = "❌ clipboard"; print("=== EXPORT ALL ==="); print(enc); print("=== FIN ===") end
-end)
-RefreshBtn.MouseButton1Click:Connect(function()
-    refreshList(); Status.Text = "Recargado"
-end)
-StopOverlay.MouseButton1Click:Connect(function()
-    if state.recording then stopRecording() end
-    if state.playing then stopPlayback() end
-end)
-CloseBtn.MouseButton1Click:Connect(function()
-    if state.recording then stopRecording() end
-    if state.playing then stopPlayback() end
-    releaseAllTouches()
-    unlockCamera()
-    restoreWindow()
-    pcall(function() ScreenGui:Destroy() end); pcall(function() OverlayGui:Destroy() end)
-end)
-
-PMFromClip.MouseButton1Click:Connect(function()
-    if not hasGetClipboard then PMCount.Text = "❌ getclipboard no disponible"; return end
-    local ok, raw = pcall(getclipboard)
-    if ok and raw and raw ~= "" then PMBox.Text = raw
-    else PMCount.Text = "❌ Portapapeles vacío" end
-end)
-PMCancel.MouseButton1Click:Connect(closePasteModal)
-PMCargar.MouseButton1Click:Connect(function()
-    local raw = PMBox.Text
-    if not raw or raw:gsub("%s", "") == "" then PMCount.Text = "❌ Caja vacía"; return end
-    local saved, skipped, err, fname, method = importFromText(raw)
-    if err then
-        PMCount.Text = "❌ " .. err
-        print("[MacroRec] Import error: " .. err)
-        return
-    end
-    if fname and saved == 1 then NameBox.Text = fname end
-    Status.Text = "📋 " .. saved .. " (" .. skipped .. ") via " .. tostring(method or "?")
-    closePasteModal()
-    refreshList()
-end)
-PMBackdrop.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1
-       or input.UserInputType == Enum.UserInputType.Touch then
-        closePasteModal()
-    end
-end)
-
-UserInputService.InputBegan:Connect(function(input, gp)
-    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
-    if UserInputService:GetFocusedTextBox() then return end
-    if input.KeyCode == Enum.KeyCode.F8 then
-        if state.recording then stopRecording() else startRecording() end
-    elseif input.KeyCode == Enum.KeyCode.F9 then
-        local name = NameBox.Text:gsub("[^%w_%-]", "_")
-        if name ~= "" then
-            local r = loadRecording(name)
-            if r and r.events then playRecording(r.events, name, state.looped, r) end
+        local target = activeFolder .. fname .. ".json"
+        if not isfile(target) then
+            Status.Text = "❌ No existe " .. target
+            print("[MacroRec] No existe: " .. target)
+            return
         end
-    elseif input.KeyCode == Enum.KeyCode.F10 then
+        local ok, raw = pcall(readfile, target)
+        if not ok or not raw then Status.Text = "❌ readfile falló"; return end
+        print("[MacroRec] 📂 abriendo " .. target .. " (" .. #raw .. " bytes)")
+        local saved, skipped, err, first, method = importFromText(raw)
+        if err then Status.Text = "❌ " .. err:sub(1, 60); print("[MacroRec] " .. err); return end
+        if first and saved == 1 then NameBox.Text = first end
+        Status.Text = "📂 " .. saved .. " (" .. skipped .. ") via " .. tostring(method or "?")
+        refreshList()
+    end)
+
+    PasteBtn.MouseButton1Click:Connect(function() openPasteModal() end)
+
+    ExportAllBtn.MouseButton1Click:Connect(function()
+        local all = {}
+        for _, name in ipairs(getAllNames()) do
+            local r = loadRecording(name); if r then table.insert(all, r) end
+        end
+        if #all == 0 then Status.Text = "❌ Nada"; return end
+        local clipFn = getClipboardSetFn()
+        if not clipFn then
+            Status.Text = "⚠ sin clipboard — en consola"
+            print("=== EXPORT ALL ==="); print(jsonEncode(all)); print("=== FIN ===")
+            return
+        end
+        local okE, enc = pcall(jsonEncode, all)
+        if not okE then Status.Text = "❌ encode"; return end
+        local okC = pcall(clipFn, enc)
+        if okC then Status.Text = "📤 " .. #all .. " copiadas (" .. #enc .. "B)"
+        else Status.Text = "❌ clipboard"; print("=== EXPORT ALL ==="); print(enc); print("=== FIN ===") end
+    end)
+    RefreshBtn.MouseButton1Click:Connect(function()
+        refreshList(); Status.Text = "Recargado"
+    end)
+    StopOverlay.MouseButton1Click:Connect(function()
         if state.recording then stopRecording() end
         if state.playing then stopPlayback() end
-    elseif input.KeyCode == Enum.KeyCode.F11 then
-        setFixedClickActive(not state.fixedClickActive)
+    end)
+    CloseBtn.MouseButton1Click:Connect(function()
+        if state.recording then stopRecording() end
+        if state.playing then stopPlayback() end
+        releaseAllTouches()
+        unlockCamera()
+        restoreWindow()
+        pcall(function() ScreenGui:Destroy() end); pcall(function() OverlayGui:Destroy() end)
+    end)
+
+    PMFromClip.MouseButton1Click:Connect(function()
+        if not hasGetClipboard then PMCount.Text = "❌ getclipboard no disponible"; return end
+        local ok, raw = pcall(getclipboard)
+        if ok and raw and raw ~= "" then PMBox.Text = raw
+        else PMCount.Text = "❌ Portapapeles vacío" end
+    end)
+    PMCancel.MouseButton1Click:Connect(closePasteModal)
+    PMCargar.MouseButton1Click:Connect(function()
+        local raw = PMBox.Text
+        if not raw or raw:gsub("%s", "") == "" then PMCount.Text = "❌ Caja vacía"; return end
+        local saved, skipped, err, fname, method = importFromText(raw)
+        if err then
+            PMCount.Text = "❌ " .. err
+            print("[MacroRec] Import error: " .. err)
+            return
+        end
+        if fname and saved == 1 then NameBox.Text = fname end
+        Status.Text = "📋 " .. saved .. " (" .. skipped .. ") via " .. tostring(method or "?")
+        closePasteModal()
+        refreshList()
+    end)
+    PMBackdrop.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+           or input.UserInputType == Enum.UserInputType.Touch then
+            closePasteModal()
+        end
+    end)
+
+    UserInputService.InputBegan:Connect(function(input, gp)
+        if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+        if UserInputService:GetFocusedTextBox() then return end
+        if input.KeyCode == Enum.KeyCode.F8 then
+            if state.recording then stopRecording() else startRecording() end
+        elseif input.KeyCode == Enum.KeyCode.F9 then
+            local name = NameBox.Text:gsub("[^%w_%-]", "_")
+            if name ~= "" then
+                local r = loadRecording(name)
+                if r and r.events then playRecording(r.events, name, state.looped, r) end
+            end
+        elseif input.KeyCode == Enum.KeyCode.F10 then
+            if state.recording then stopRecording() end
+            if state.playing then stopPlayback() end
+        elseif input.KeyCode == Enum.KeyCode.F11 then
+            setFixedClickActive(not state.fixedClickActive)
+        end
+    end)
+end
+
+--==================================================================
+--  GRABACIÓN INPUT HOOKS (Encapsulados)
+--==================================================================
+do
+    UserInputService.InputBegan:Connect(function(input, gp)
+        if not state.recording or UserInputService:GetFocusedTextBox() then return end
+        if input.KeyCode == Enum.KeyCode.F8 or input.KeyCode == Enum.KeyCode.F9
+           or input.KeyCode == Enum.KeyCode.F10 or isOverGui() then return end
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            pushEvent({ type = "keydown", key = input.KeyCode.Name })
+        elseif input.UserInputType == Enum.UserInputType.MouseButton1 then pushEvent({ type = "m1down" })
+        elseif input.UserInputType == Enum.UserInputType.MouseButton2 then pushEvent({ type = "m2down" }) end
+    end)
+    UserInputService.InputEnded:Connect(function(input, gp)
+        if not state.recording or UserInputService:GetFocusedTextBox() then return end
+        if input.KeyCode == Enum.KeyCode.F8 or input.KeyCode == Enum.KeyCode.F9
+           or input.KeyCode == Enum.KeyCode.F10 or isOverGui() then return end
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            pushEvent({ type = "keyup", key = input.KeyCode.Name })
+        elseif input.UserInputType == Enum.UserInputType.MouseButton1 then pushEvent({ type = "m1up" })
+        elseif input.UserInputType == Enum.UserInputType.MouseButton2 then pushEvent({ type = "m2up" }) end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if not state.recording then return end
+        if input.UserInputType == Enum.UserInputType.MouseWheel then
+            pushEvent({ type = "wheel", delta = input.Position.Z })
+        end
+    end)
+
+    if TouchEnabled then
+        UserInputService.InputBegan:Connect(function(input, gp)
+            if input.UserInputType ~= Enum.UserInputType.Touch then return end
+            if not state.recording then return end
+            if isPointOverMainGui(input.Position.X, input.Position.Y) then return end
+            if touchMap[input] then return end
+
+            nextTouchId = nextTouchId + 1
+            local id = nextTouchId
+            touchMap[input] = { id = id, x = input.Position.X, y = input.Position.Y }
+            lastTouchPositions[id] = Vector2.new(input.Position.X, input.Position.Y)
+            pushEvent({ type = "touchdown", x = input.Position.X, y = input.Position.Y, id = id })
+        end)
+
+        UserInputService.InputChanged:Connect(function(input, gp)
+            if input.UserInputType ~= Enum.UserInputType.Touch then return end
+            if not state.recording then return end
+            local info = touchMap[input]
+            if not info then return end
+            if isPointOverMainGui(input.Position.X, input.Position.Y) then return end
+
+            local newPos = Vector2.new(input.Position.X, input.Position.Y)
+            local last = lastTouchPositions[info.id]
+            if last and (newPos - last).Magnitude < REC_TOUCH_MIN_PIXELS then return end
+            lastTouchPositions[info.id] = newPos
+
+            info.x, info.y = newPos.X, newPos.Y
+            pushEvent({ type = "touchmove", x = newPos.X, y = newPos.Y, id = info.id })
+        end)
+
+        UserInputService.InputEnded:Connect(function(input, gp)
+            if input.UserInputType ~= Enum.UserInputType.Touch then return end
+            if not state.recording then return end
+            local info = touchMap[input]
+            if not info then return end
+
+            touchMap[input] = nil
+            lastTouchPositions[info.id] = nil
+            pushEvent({ type = "touchup", x = input.Position.X, y = input.Position.Y, id = info.id })
+        end)
     end
+end
+
+RunService.RenderStepped:Connect(function()
+    if state.recording then
+        Chrono.Text = fmtDuration(os.clock() - state.recordStart)
+        if MouseEnabled then
+            local mp = UserInputService:GetMouseLocation()
+            if (mp - lastMousePos).Magnitude > REC_MOUSE_MIN_PIXELS then
+                pushEvent({ type = "mouse", x = mp.X, y = mp.Y }); lastMousePos = mp
+            end
+        end
+        local cam = workspace.CurrentCamera
+        if cam then
+            local cfChanged  = cframesDiffer(lastCamCFrame, cam.CFrame, REC_CAM_POS_THRESH, REC_CAM_ROT_THRESH)
+            local fovChanged = lastCamFOV == nil or math.abs(lastCamFOV - cam.FieldOfView) > REC_CAM_FOV_THRESH
+            if cfChanged or fovChanged then
+                pushEvent({ type = "cam", cframe = { cam.CFrame:GetComponents() }, fov = cam.FieldOfView })
+                lastCamCFrame = cam.CFrame
+                lastCamFOV    = cam.FieldOfView
+            end
+        end
+        if state.moveEnabled then
+            local char = LocalPlayer.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                if cframesDiffer(lastHrpCFrame, hrp.CFrame, REC_HRP_POS_THRESH, REC_HRP_ROT_THRESH) then
+                    pushEvent({ type = "hrp", cframe = { hrp.CFrame:GetComponents() } })
+                    lastHrpCFrame = hrp.CFrame
+                end
+            end
+        end
+    elseif state.playing then
+        if state.playStart then Chrono.Text = fmtDuration(os.clock() - state.playStart) end
+    else
+        Chrono.Text = "00:00.000"
+    end
+    pcall(tryFixedClick)
 end)
 
 --==================================================================
@@ -2524,7 +2540,6 @@ if state.autoloadName then
     print("[MacroRec] 🍌 Auto-load configurada: " .. state.autoloadName)
 end
 
---============ RESTAURAR WATCHER (v8.5.1) ============
 do
     local w = readWatcher()
     if w then
@@ -2595,7 +2610,7 @@ if state.autoloadName then
     end
 end
 
-print("=== Macro Recorder v8.5.1 ===")
+print("=== Macro Recorder v8.5.2 ===")
 print(string.format("[Plataforma] Touch=%s Mouse=%s Keyboard=%s | firetouchinput=%s VIM=%s",
     tostring(TouchEnabled), tostring(MouseEnabled), tostring(KeyboardEnabled),
     tostring(hasFireTouchInput), tostring(hasVIMSendMouse)))
