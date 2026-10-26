@@ -1,10 +1,10 @@
 --[[
 ================================================================================
-  MACRO RECORDER v8.5.4 — Auto-click disparado por visibilidad de botón
+  MACRO RECORDER v8.5.5 — Auto-click disparado por visibilidad de botón
                               + Persistencia del watcher
                               + FIX: Out of local registers (límite 200)
                               + Delay de 2s antes de hacer click
-                              + Coordenada X movida 1 píxel a la izquierda (558)
+                              + Movimiento: ir a 559 -> deslizar a 554 -> click
 ================================================================================
 ]]
 
@@ -89,10 +89,12 @@ local BAR_W      = 170
 local BAR_H      = 52
 
 --============ AUTO-CLICK POR VISIBILIDAD DE BOTÓN ============
-local FIXED_CLICK_X        = 558  -- ⬅️ 1 píxel a la izquierda
+-- Coordenada inicial de destino (559, 511). Luego se desplazará 5 píxeles a la izquierda.
+local FIXED_CLICK_X        = 559
 local FIXED_CLICK_Y        = 511
 local FIXED_CLICK_COOLDOWN = 0.4
-local FIXED_CLICK_DELAY    = 2.0  -- ⏳ Delay de 2 segundos
+local FIXED_CLICK_DELAY    = 2.0  -- ⏳ Delay de 2 segundos tras ser visible
+local SLIDE_LEFT_PIXELS    = 5    -- ⬅️ Píxeles a la izquierda antes del click
 
 local DEBUG_KEYS = true
 local FORCE_VIM  = false
@@ -286,7 +288,7 @@ do
 
     Title = Instance.new("TextLabel")
     Title.Size = UDim2.new(1, -40, 1, 0); Title.Position = UDim2.new(0, 12, 0, 0)
-    Title.BackgroundTransparency = 1; Title.Text = "● Macro Recorder v8.5.4"
+    Title.BackgroundTransparency = 1; Title.Text = "● Macro Recorder v8.5.5"
     Title.TextColor3 = Color3.fromRGB(210, 210, 255)
     Title.Font = Enum.Font.GothamBold; Title.TextSize = 13
     Title.TextXAlignment = Enum.TextXAlignment.Left; Title.Parent = TitleBar
@@ -408,7 +410,7 @@ do
     FixedClickBtn.Size = UDim2.new(1, -20, 0, 24)
     FixedClickBtn.Position = UDim2.new(0, 10, 0, fixedY)
     FixedClickBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
-    FixedClickBtn.Text = "🎯 Vigilar botón → click en (" .. FIXED_CLICK_X .. "," .. FIXED_CLICK_Y .. "): OFF"
+    FixedClickBtn.Text = "🎯 Vigilar botón → click en (" .. (FIXED_CLICK_X - SLIDE_LEFT_PIXELS) .. "," .. FIXED_CLICK_Y .. "): OFF"
     FixedClickBtn.TextColor3 = Color3.new(1, 1, 1)
     FixedClickBtn.Font = Enum.Font.GothamBold
     FixedClickBtn.TextSize = 11
@@ -490,9 +492,10 @@ do
     pcall(function() OverlayGui.Parent = guiParent end)
     if not OverlayGui.Parent then OverlayGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
+    -- El marcador visual ahora mostrará la posición final del click
     FixedMarker = Instance.new("Frame")
     FixedMarker.Size = UDim2.new(0, 16, 0, 16)
-    FixedMarker.Position = UDim2.new(0, FIXED_CLICK_X - 8, 0, FIXED_CLICK_Y - 8)
+    FixedMarker.Position = UDim2.new(0, (FIXED_CLICK_X - SLIDE_LEFT_PIXELS) - 8, 0, FIXED_CLICK_Y - 8)
     FixedMarker.BackgroundColor3 = Color3.fromRGB(255, 200, 50)
     FixedMarker.BackgroundTransparency = 0.35
     FixedMarker.BorderSizePixel = 0
@@ -592,7 +595,7 @@ local function restoreWindow()
             d:SetAttribute("_MRVisSaved", nil)
         end
     end
-    Title.Text = "● Macro Recorder v8.5.4"
+    Title.Text = "● Macro Recorder v8.5.5"
     CloseBtn.Visible = true
 end
 
@@ -1465,10 +1468,29 @@ local function isBtnFullyVisible(btn)
 end
 
 local function moveCursorAndClick()
+    -- 1. Mover a la posición inicial absoluta
     if fn.mousemoveabs then
         pcall(fn.mousemoveabs, FIXED_CLICK_X, FIXED_CLICK_Y)
-        task.wait(0.03)
+        task.wait(0.1) -- Pausa breve para asentar el ratón
     end
+
+    -- 2. Desplazar X píxeles a la izquierda
+    local finalX = FIXED_CLICK_X - SLIDE_LEFT_PIXELS
+    local finalY = FIXED_CLICK_Y
+
+    if fn.mousemoverel then
+        -- Si el executor soporta movimiento relativo, lo usamos para que sea un deslizamiento físico
+        pcall(fn.mousemoverel, -SLIDE_LEFT_PIXELS, 0)
+        task.wait(0.1) -- Pausa breve antes de clickear
+    else
+        -- Fallback: si no hay mousemoverel, hacemos un mousemoveabs a la posición calculada
+        if fn.mousemoveabs then
+            pcall(fn.mousemoveabs, finalX, finalY)
+            task.wait(0.1)
+        end
+    end
+
+    -- 3. Hacer click en la nueva posición
     local clicked = false
     if type(fn.mouse1click) == "function" then
         local ok = pcall(fn.mouse1click)
@@ -1482,19 +1504,21 @@ local function moveCursorAndClick()
     end
     if not clicked and hasVIMSendMouse then
         pcall(function()
-            VirtualInputManager:SendMouseButtonEvent(FIXED_CLICK_X, FIXED_CLICK_Y, 0, true, game, 0)
+            VirtualInputManager:SendMouseButtonEvent(finalX, finalY, 0, true, game, 0)
             task.wait(0.05)
-            VirtualInputManager:SendMouseButtonEvent(FIXED_CLICK_X, FIXED_CLICK_Y, 0, false, game, 0)
+            VirtualInputManager:SendMouseButtonEvent(finalX, finalY, 0, false, game, 0)
         end)
         clicked = true
     end
     if not clicked and hasFireTouchInput then
-        pcall(firetouchinput, FIXED_CLICK_X, FIXED_CLICK_Y, 0)
+        pcall(firetouchinput, finalX, finalY, 0)
         task.wait(0.05)
-        pcall(firetouchinput, FIXED_CLICK_X, FIXED_CLICK_Y, 1)
+        pcall(firetouchinput, finalX, finalY, 1)
         clicked = true
     end
-    clickCircle(FIXED_CLICK_X, FIXED_CLICK_Y, Color3.fromRGB(255, 200, 50))
+    
+    -- Efecto visual en la posición final
+    clickCircle(finalX, finalY, Color3.fromRGB(255, 200, 50))
     return clicked
 end
 
@@ -1516,7 +1540,7 @@ local function tryFixedClick()
             state.fixedClickLastAt = now
             state.fixedClickLastBtn = btn
             Status.Text = string.format("🎯 Botón visible → click en (%d,%d)",
-                FIXED_CLICK_X, FIXED_CLICK_Y)
+                FIXED_CLICK_X - SLIDE_LEFT_PIXELS, FIXED_CLICK_Y)
         else
             Status.Text = "⚠ Botón visible pero no se pudo clickear"
         end
@@ -1542,14 +1566,14 @@ local function setFixedClickActive(active, silent)
         end
         state.fixedClickActive = true
         fixedBtnWasVisible = false
-        FixedClickBtn.Text = "🎯 Vigilar botón → click en (" .. FIXED_CLICK_X .. "," .. FIXED_CLICK_Y .. "): ON"
+        FixedClickBtn.Text = "🎯 Vigilar botón → click en (" .. (FIXED_CLICK_X - SLIDE_LEFT_PIXELS) .. "," .. FIXED_CLICK_Y .. "): ON"
         FixedClickBtn.BackgroundColor3 = Color3.fromRGB(50, 130, 70)
         FixedMarker.Visible = true
         if not silent then Status.Text = "🎯 Vigilando: " .. path end
     else
         state.fixedClickActive = false
         fixedBtnWasVisible = false
-        FixedClickBtn.Text = "🎯 Vigilar botón → click en (" .. FIXED_CLICK_X .. "," .. FIXED_CLICK_Y .. "): OFF"
+        FixedClickBtn.Text = "🎯 Vigilar botón → click en (" .. (FIXED_CLICK_X - SLIDE_LEFT_PIXELS) .. "," .. FIXED_CLICK_Y .. "): OFF"
         FixedClickBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
         FixedMarker.Visible = false
         if not silent then Status.Text = "Auto-click por visibilidad desactivado" end
@@ -2611,14 +2635,14 @@ if state.autoloadName then
     end
 end
 
-print("=== Macro Recorder v8.5.4 ===")
+print("=== Macro Recorder v8.5.5 ===")
 print(string.format("[Plataforma] Touch=%s Mouse=%s Keyboard=%s | firetouchinput=%s VIM=%s",
     tostring(TouchEnabled), tostring(MouseEnabled), tostring(KeyboardEnabled),
     tostring(hasFireTouchInput), tostring(hasVIMSendMouse)))
 print(string.format("[Viewport inicial] %dx%d",
     currentViewport().X, currentViewport().Y))
-print(string.format("[Auto-click] vigilar botón del PathBox → cursor a (%d,%d) y click | delay %.2fs | cooldown %.2fs",
-    FIXED_CLICK_X, FIXED_CLICK_Y, FIXED_CLICK_DELAY, FIXED_CLICK_COOLDOWN))
+print(string.format("[Auto-click] vigilar botón del PathBox → cursor a (%d,%d), deslizar %d px izq, click | delay %.2fs | cooldown %.2fs",
+    FIXED_CLICK_X, FIXED_CLICK_Y, SLIDE_LEFT_PIXELS, FIXED_CLICK_DELAY, FIXED_CLICK_COOLDOWN))
 print("F8=Grabar  F9=Reproducir  F10=Detener  F11=Vigilar botón ON/OFF")
-print("🐵 = auto-ejecutar  🍌 = quitar  |  🎯 = vigilar botón → click (558,511)")
+print("🐵 = auto-ejecutar  🍌 = quitar  |  🎯 = vigilar botón → deslizar y click")
 print("Carpeta activa: " .. tostring(activeFolder))
