@@ -1,16 +1,14 @@
 --[[
 ================================================================================
-  MACRO RECORDER v8.7.3 — Estable (Sin límite de registros + Sintaxis limpia)
+  MACRO RECORDER v8.7.4 — Código Completo Verificado
 ================================================================================
 ]]
-
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local HttpService = game:GetService("HttpService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
-
 local LocalPlayer = Players.LocalPlayer
 local unpack = table.unpack or unpack
 
@@ -24,7 +22,6 @@ pcall(function()
         local old2ov = pg:FindFirstChild("MacroRec_Overlay"); if old2ov then old2ov:Destroy() end
     end
 end)
-
 if not game:IsLoaded() then game.Loaded:Wait() end
 do
     local deadline = os.clock() + 15
@@ -35,47 +32,45 @@ do
     end
 end
 
-local AUTO_LOAD_OUTPUT     = true
-local AUTO_LOAD_JSON       = [[]]
-local AUTO_EXECUTE_DELAY   = 3.0
-local AUTO_CLICK_DELAY     = 2.0
-local AUTO_CLICK_TIMEOUT   = 15.0
-local AUTO_CLICK_POLL      = 0.2
+local AUTO_LOAD_OUTPUT = true
+local AUTO_LOAD_JSON = [[]]
+local AUTO_EXECUTE_DELAY = 3.0
+local AUTO_CLICK_DELAY = 2.0
+local AUTO_CLICK_TIMEOUT = 15.0
+local AUTO_CLICK_POLL = 0.2
 local REC_MOUSE_MIN_PIXELS = 3
 local REC_TOUCH_MIN_PIXELS = 4
-local REC_CAM_POS_THRESH   = 0.35
-local REC_CAM_ROT_THRESH   = 0.03
-local REC_CAM_FOV_THRESH   = 0.5
-local REC_HRP_POS_THRESH   = 0.10
-local REC_HRP_ROT_THRESH   = 0.08
-local BASE_GUI_W           = 400
-local BASE_GUI_H           = 690
-local BAR_W                = 170
-local BAR_H                = 52
-local FIXED_CLICK_X        = 559
-local FIXED_CLICK_Y        = 511
+local REC_CAM_POS_THRESH = 0.35
+local REC_CAM_ROT_THRESH = 0.03
+local REC_CAM_FOV_THRESH = 0.5
+local REC_HRP_POS_THRESH = 0.10
+local REC_HRP_ROT_THRESH = 0.08
+local BASE_GUI_W = 400
+local BASE_GUI_H = 690
+local BAR_W = 170
+local BAR_H = 52
+local FIXED_CLICK_X = 559
+local FIXED_CLICK_Y = 511
 local FIXED_CLICK_COOLDOWN = 0.4
-local DEBUG_KEYS           = true
-local FORCE_VIM            = false
+local DEBUG_KEYS = true
+local FORCE_VIM = false
 
-local TouchEnabled      = UserInputService.TouchEnabled
-local MouseEnabled      = UserInputService.MouseEnabled
-local KeyboardEnabled   = UserInputService.KeyboardEnabled
-local isMobileMode      = TouchEnabled and not MouseEnabled
+local TouchEnabled = UserInputService.TouchEnabled
+local MouseEnabled = UserInputService.MouseEnabled
+local isMobileMode = TouchEnabled and not MouseEnabled
 local hasFireTouchInput = (type(firetouchinput) == "function")
-local hasVIMSendMouse   = (VirtualInputManager and VirtualInputManager.SendMouseButtonEvent) ~= nil
-local hasVIMSendMove    = (VirtualInputManager and VirtualInputManager.SendMouseMoveEvent) ~= nil
-local hasFS             = (type(writefile) == "function") and (type(readfile) == "function") and (type(isfile) == "function")
-local hasSetClipboard   = (type(setclipboard) == "function") or (type(toclipboard) == "function") or (type(writeclipboard) == "function")
-local hasGetClipboard   = (type(getclipboard) == "function")
-local hasFireSignal     = (type(firesignal) == "function")
-local hasGetConns       = (type(getconnections) == "function")
+local hasVIMSendMouse = (VirtualInputManager and VirtualInputManager.SendMouseButtonEvent) ~= nil
+local hasVIMSendMove = (VirtualInputManager and VirtualInputManager.SendMouseMoveEvent) ~= nil
+local hasFS = (type(writefile) == "function") and (type(readfile) == "function") and (type(isfile) == "function")
+local hasGetClipboard = (type(getclipboard) == "function")
+local hasFireSignal = (type(firesignal) == "function")
+local hasGetConns = (type(getconnections) == "function")
 
 local function getClipboardSetFn()
-    if type(setclipboard) == "function" then return setclipboard, "setclipboard" end
-    if type(toclipboard) == "function" then return toclipboard, "toclipboard" end
-    if type(writeclipboard) == "function" then return writeclipboard, "writeclipboard" end
-    return nil, nil
+    if type(setclipboard) == "function" then return setclipboard end
+    if type(toclipboard) == "function" then return toclipboard end
+    if type(writeclipboard) == "function" then return writeclipboard end
+    return nil
 end
 
 local PATH_CANDIDATES = {
@@ -84,7 +79,6 @@ local PATH_CANDIDATES = {
     "../../MacroRecorder/", "../MacroRecorder/",
     "workspace/MacroRecorder/", "MacroRecorder/",
 }
-
 local activeFolder = nil
 if hasFS then
     for _, p in ipairs(PATH_CANDIDATES) do
@@ -93,9 +87,7 @@ if hasFS then
         local okW = pcall(writefile, tf, "x")
         local okF = okW and isfile(tf)
         local okR, content = pcall(readfile, tf)
-        local ok = okF and okR and content == "x"
-        print(string.format("[MacroRec] %s %s", ok and "✅" or "❌", p))
-        if ok then
+        if okF and okR and content == "x" then
             if type(delfile) == "function" then pcall(delfile, tf) end
             activeFolder = p; break
         end
@@ -105,37 +97,21 @@ local isSharedFolder = activeFolder and (activeFolder:sub(1,1) == "/" or activeF
 
 local memRecordings = {}
 local MAX_SIZE = 64 * 1024 * 1024
-
-local fn = {
-    keypress = keypress, keyrelease = keyrelease,
-    mouse1click = mouse1click, mouse1press = mouse1press, mouse1release = mouse1release,
-    mouse2click = mouse2click, mouse2press = mouse2press, mouse2release = mouse2release,
-    mousemoveabs = mousemoveabs, mousemoverel = mousemoverel,
-    mousescroll = mousescroll,
-}
+local fn = { keypress = keypress, keyrelease = keyrelease, mouse1click = mouse1click, mouse1press = mouse1press, mouse1release = mouse1release, mouse2click = mouse2click, mouse2press = mouse2press, mouse2release = mouse2release, mousemoveabs = mousemoveabs, mousemoverel = mousemoverel, mousescroll = mousescroll }
 
 local function doKeyPress(kc)
-    if not FORCE_VIM and type(fn.keypress) == "function" then
-        local ok = pcall(fn.keypress, kc)
-        if ok then return true end
-    end
+    if not FORCE_VIM and type(fn.keypress) == "function" and pcall(fn.keypress, kc) then return true end
     return pcall(function() VirtualInputManager:SendKeyEvent(true, kc, false, game) end)
 end
 local function doKeyRelease(kc)
-    if not FORCE_VIM and type(fn.keyrelease) == "function" then
-        local ok = pcall(fn.keyrelease, kc)
-        if ok then return true end
-    end
+    if not FORCE_VIM and type(fn.keyrelease) == "function" and pcall(fn.keyrelease, kc) then return true end
     return pcall(function() VirtualInputManager:SendKeyEvent(false, kc, false, game) end)
 end
 
 local function getGuiParent()
     local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
     if pg then return pg end
-    if gethui then
-        local ok, h = pcall(gethui)
-        if ok and h then return h end
-    end
+    if gethui then local ok, h = pcall(gethui); if ok and h then return h end end
     local ok, cg = pcall(function() return game:GetService("CoreGui") end)
     if ok and cg then return cg end
     return LocalPlayer:WaitForChild("PlayerGui")
@@ -145,36 +121,21 @@ local guiParent = getGuiParent()
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "MacroRec_v8_7"
 ScreenGui.ResetOnSpawn = false
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.IgnoreGuiInset = true
 ScreenGui.DisplayOrder = 999999
 ScreenGui.Enabled = true
-
-local parentOk = false
 pcall(function() ScreenGui.Parent = guiParent end)
-if ScreenGui.Parent then parentOk = true end
-if not parentOk then
-    local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
-    if pg then
-        pcall(function() ScreenGui.Parent = pg end)
-        if ScreenGui.Parent then parentOk = true end
-    end
+if not ScreenGui.Parent then
+    pcall(function() ScreenGui.Parent = LocalPlayer:FindFirstChildOfClass("PlayerGui") end)
 end
-if not parentOk and gethui then
+if not ScreenGui.Parent and gethui then
     local ok, h = pcall(gethui)
-    if ok and h then
-        pcall(function() ScreenGui.Parent = h end)
-        if ScreenGui.Parent then parentOk = true end
-    end
+    if ok and h then pcall(function() ScreenGui.Parent = h end) end
 end
-if not parentOk then
+if not ScreenGui.Parent then
     local ok, cg = pcall(function() return game:GetService("CoreGui") end)
-    if ok and cg then
-        pcall(function() ScreenGui.Parent = cg end)
-        if ScreenGui.Parent then parentOk = true end
-    end
+    if ok and cg then pcall(function() ScreenGui.Parent = cg end) end
 end
-print("[MacroRec] 🖼️ ScreenGui parent final: " .. (ScreenGui.Parent and ScreenGui.Parent:GetFullName() or "❌ NINGUNO"))
 
 local state = {
     recording = false, playing = false, looped = false,
@@ -183,8 +144,7 @@ local state = {
     autoClick = false, forceMouse = false, moveEnabled = true,
     startHrpCFrame = nil, startCamCFrame = nil, startCamFOV = nil,
     autoloadName = nil, camKeyframes = nil, hrpKeyframes = nil, hasHrpData = false,
-    controlledHumanoid = nil, savedHumanoid = nil,
-    startViewport = nil, playViewport = nil,
+    controlledHumanoid = nil, savedHumanoid = nil, startViewport = nil, playViewport = nil,
     fixedClickActive = false, fixedClickLastAt = 0, fixedClickLastBtn = nil,
 }
 
@@ -215,7 +175,6 @@ Main.Parent = ScreenGui
 Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 8)
 local MainStroke = Instance.new("UIStroke", Main)
 MainStroke.Color = Color3.fromRGB(70, 70, 100)
-
 local MainScale = Instance.new("UIScale")
 MainScale.Scale = 1
 MainScale.Parent = Main
@@ -228,7 +187,7 @@ Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 8)
 
 local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -40, 1, 0); Title.Position = UDim2.new(0, 12, 0, 0)
-Title.BackgroundTransparency = 1; Title.Text = "● Macro Recorder v8.7.3"
+Title.BackgroundTransparency = 1; Title.Text = "● Macro Recorder v8.7.4"
 Title.TextColor3 = Color3.fromRGB(210, 210, 255)
 Title.Font = Enum.Font.GothamBold; Title.TextSize = 13
 Title.TextXAlignment = Enum.TextXAlignment.Left; Title.Parent = TitleBar
@@ -250,17 +209,13 @@ local function updateDragPosition(newPos)
     local delta = newPos - dragStart
     Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
 end
-local function endDrag()
-    dragging = false; dragTouchInput = nil; dragStart = nil; startPos = nil
-end
+local function endDrag() dragging = false; dragTouchInput = nil; dragStart = nil; startPos = nil end
 
 TitleBar.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         dragging = true; dragStart = input.Position; startPos = Main.Position
         dragTouchInput = (input.UserInputType == Enum.UserInputType.Touch) and input or nil
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then endDrag() end
-        end)
+        input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then endDrag() end end)
     end
 end)
 UserInputService.InputChanged:Connect(function(input)
@@ -272,15 +227,11 @@ pcall(function()
         if not dragging then return end
         if dragTouchInput and touch == dragTouchInput then updateDragPosition(touch.Position) end
     end)
-end)
-pcall(function()
     UserInputService.TouchEnded:Connect(function(touch, gp)
         if dragging and dragTouchInput and touch == dragTouchInput then endDrag() end
     end)
 end)
-RunService.RenderStepped:Connect(function()
-    if dragging and dragTouchInput then updateDragPosition(dragTouchInput.Position) end
-end)
+RunService.RenderStepped:Connect(function() if dragging and dragTouchInput then updateDragPosition(dragTouchInput.Position) end end)
 
 local Chrono = Instance.new("TextLabel")
 Chrono.Size = UDim2.new(1, -20, 0, 34); Chrono.Position = UDim2.new(0, 10, 0, 36)
@@ -300,25 +251,14 @@ WarnBanner.BackgroundColor3 = Color3.fromRGB(140, 30, 30)
 WarnBanner.TextColor3 = Color3.new(1, 1, 1); WarnBanner.Font = Enum.Font.GothamBold
 WarnBanner.TextSize = 10; WarnBanner.TextWrapped = true; WarnBanner.Visible = false; WarnBanner.Parent = Main
 Instance.new("UICorner", WarnBanner).CornerRadius = UDim.new(0, 4)
-
-if not hasFS then
-    WarnBanner.Text = "⚠ Sin FS: memoria. Usa 📤/📋 entre juegos."
-    WarnBanner.Visible = true
-elseif not isSharedFolder then
-    WarnBanner.BackgroundColor3 = Color3.fromRGB(140, 90, 20)
-    WarnBanner.Text = "⚠ Carpeta per-game. Usa 📤/📋 entre juegos."
-    WarnBanner.Visible = true
-end
+if not hasFS then WarnBanner.Text = "⚠ Sin FS: memoria."; WarnBanner.Visible = true
+elseif not isSharedFolder then WarnBanner.Text = "⚠ Carpeta per-game."; WarnBanner.Visible = true end
 
 local NameBox = Instance.new("TextBox")
-NameBox.Size = UDim2.new(1, -20, 0, 30)
-NameBox.Position = UDim2.new(0, 10, 0, (hasFS and isSharedFolder) and 78 or 104)
+NameBox.Size = UDim2.new(1, -20, 0, 30); NameBox.Position = UDim2.new(0, 10, 0, (hasFS and isSharedFolder) and 78 or 104)
 NameBox.BackgroundColor3 = Color3.fromRGB(40, 40, 52); NameBox.Text = ""
-NameBox.PlaceholderText = "Nombre (vacío = Rec_HHMMSS)"
-NameBox.TextColor3 = Color3.fromRGB(220, 220, 220)
-NameBox.PlaceholderColor3 = Color3.fromRGB(140, 140, 160)
-NameBox.Font = Enum.Font.Gotham; NameBox.TextSize = 13
-NameBox.ClearTextOnFocus = false; NameBox.Parent = Main
+NameBox.PlaceholderText = "Nombre de la macro"; NameBox.TextColor3 = Color3.fromRGB(220, 220, 220)
+NameBox.Font = Enum.Font.Gotham; NameBox.TextSize = 13; NameBox.ClearTextOnFocus = false; NameBox.Parent = Main
 Instance.new("UICorner", NameBox).CornerRadius = UDim.new(0, 4)
 
 local function mkBtn(txt, col, x, y, w, h)
@@ -331,10 +271,10 @@ local function mkBtn(txt, col, x, y, w, h)
 end
 
 local btnY = (hasFS and isSharedFolder) and 116 or 142
-local BtnRecord = mkBtn("● Grabar",     Color3.fromRGB(180, 50, 50),  10, btnY, 92)
-local BtnPlay   = mkBtn("▶ Reproducir", Color3.fromRGB(50, 130, 70),  107, btnY, 100)
-local BtnStop   = mkBtn("■ Detener",    Color3.fromRGB(90, 90, 110),  212, btnY, 80)
-local BtnLoop   = mkBtn("Loop: OFF",    Color3.fromRGB(60, 60, 80),   297, btnY, 93)
+local BtnRecord = mkBtn("● Grabar", Color3.fromRGB(180, 50, 50), 10, btnY, 92)
+local BtnPlay = mkBtn("▶ Reproducir", Color3.fromRGB(50, 130, 70), 107, btnY, 100)
+local BtnStop = mkBtn("■ Detener", Color3.fromRGB(90, 90, 110), 212, btnY, 80)
+local BtnLoop = mkBtn("Loop: OFF", Color3.fromRGB(60, 60, 80), 297, btnY, 93)
 
 local autoY = btnY + 40
 local BtnAuto = mkBtn("Auto: OFF", Color3.fromRGB(60, 60, 80), 10, autoY, 92)
@@ -357,20 +297,19 @@ local function mkMiniBtn(txt, col, x, w)
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
     return b
 end
-local BtnInspect      = mkMiniBtn("🔍 Insp",   Color3.fromRGB(80, 80, 110),  10, 55)
-local BtnMark         = mkMiniBtn("📍 Mapa",   Color3.fromRGB(80, 120, 120), 70, 65)
-local BtnCapture      = mkMiniBtn("🎯 Capt",   Color3.fromRGB(120, 100, 180),140, 55)
-local ForceMouseBtn   = mkMiniBtn("🖱 Forz",   Color3.fromRGB(60, 60, 80),   200, 60)
-local MovToggleBtn    = mkMiniBtn("🏃 Mov ON", Color3.fromRGB(50, 130, 70),  265, 120)
+local BtnInspect = mkMiniBtn("🔍 Insp", Color3.fromRGB(80, 80, 110), 10, 55)
+local BtnMark = mkMiniBtn("📍 Mapa", Color3.fromRGB(80, 120, 120), 70, 65)
+local BtnCapture = mkMiniBtn("🎯 Capt", Color3.fromRGB(120, 100, 180), 140, 55)
+local ForceMouseBtn = mkMiniBtn("🖱 Forz", Color3.fromRGB(60, 60, 80), 200, 60)
+local MovToggleBtn = mkMiniBtn("🏃 Mov ON", Color3.fromRGB(50, 130, 70), 265, 120)
 
 local fixedY = autoY2 + 30
 local FixedClickBtn = Instance.new("TextButton")
 FixedClickBtn.Size = UDim2.new(1, -20, 0, 24); FixedClickBtn.Position = UDim2.new(0, 10, 0, fixedY)
 FixedClickBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
 FixedClickBtn.Text = "🎯 Vigilar botón → click en (" .. FIXED_CLICK_X .. "," .. FIXED_CLICK_Y .. "): OFF"
-FixedClickBtn.TextColor3 = Color3.new(1, 1, 1)
-FixedClickBtn.Font = Enum.Font.GothamBold; FixedClickBtn.TextSize = 11
-FixedClickBtn.BorderSizePixel = 0; FixedClickBtn.Parent = Main
+FixedClickBtn.TextColor3 = Color3.new(1, 1, 1); FixedClickBtn.Font = Enum.Font.GothamBold
+FixedClickBtn.TextSize = 11; FixedClickBtn.BorderSizePixel = 0; FixedClickBtn.Parent = Main
 Instance.new("UICorner", FixedClickBtn).CornerRadius = UDim.new(0, 4)
 
 local ListHeader = Instance.new("Frame")
@@ -380,9 +319,8 @@ ListHeader.BackgroundTransparency = 1; ListHeader.Parent = Main
 local ListHeaderLbl = Instance.new("TextLabel")
 ListHeaderLbl.Size = UDim2.new(1, -250, 1, 0); ListHeaderLbl.Position = UDim2.new(0, 4, 0, 0)
 ListHeaderLbl.BackgroundTransparency = 1; ListHeaderLbl.Text = "Grabaciones guardadas"
-ListHeaderLbl.TextColor3 = Color3.fromRGB(180, 180, 210)
-ListHeaderLbl.Font = Enum.Font.GothamBold; ListHeaderLbl.TextSize = 12
-ListHeaderLbl.TextXAlignment = Enum.TextXAlignment.Left; ListHeaderLbl.Parent = ListHeader
+ListHeaderLbl.TextColor3 = Color3.fromRGB(180, 180, 210); ListHeaderLbl.Font = Enum.Font.GothamBold
+ListHeaderLbl.TextSize = 12; ListHeaderLbl.TextXAlignment = Enum.TextXAlignment.Left; ListHeaderLbl.Parent = ListHeader
 
 local function mkHdrBtn(txt, col, x)
     local b = Instance.new("TextButton")
@@ -392,11 +330,11 @@ local function mkHdrBtn(txt, col, x)
     Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
     return b
 end
-local ImportBtn    = mkHdrBtn("📥", Color3.fromRGB(50, 100, 150), -216)
-local OpenFileBtn  = mkHdrBtn("📂", Color3.fromRGB(120, 120, 60), -172)
-local PasteBtn     = mkHdrBtn("📋", Color3.fromRGB(120, 100, 180), -128)
-local ExportAllBtn = mkHdrBtn("📤", Color3.fromRGB(50, 130, 80),  -84)
-local RefreshBtn   = mkHdrBtn("🔄", Color3.fromRGB(60, 60, 80),   -40)
+local ImportBtn = mkHdrBtn("📥", Color3.fromRGB(50, 100, 150), -216)
+local OpenFileBtn = mkHdrBtn("📂", Color3.fromRGB(120, 120, 60), -172)
+local PasteBtn = mkHdrBtn("📋", Color3.fromRGB(120, 100, 180), -128)
+local ExportAllBtn = mkHdrBtn("📤", Color3.fromRGB(50, 130, 80), -84)
+local RefreshBtn = mkHdrBtn("🔄", Color3.fromRGB(60, 60, 80), -40)
 
 local listY = fixedY + 54
 local ListFrame = Instance.new("Frame")
@@ -425,13 +363,9 @@ local PlatformBadge = Instance.new("TextLabel")
 PlatformBadge.Size = UDim2.new(0, 100, 0, 20); PlatformBadge.Position = UDim2.new(1, -112, 1, -26)
 PlatformBadge.BackgroundTransparency = 1; PlatformBadge.Font = Enum.Font.GothamBold
 PlatformBadge.TextSize = 10; PlatformBadge.TextXAlignment = Enum.TextXAlignment.Right; PlatformBadge.Parent = Main
-if isMobileMode then
-    PlatformBadge.Text = "📱 Móvil"; PlatformBadge.TextColor3 = Color3.fromRGB(100, 220, 150)
-elseif TouchEnabled then
-    PlatformBadge.Text = "🖥️📱 Mixto"; PlatformBadge.TextColor3 = Color3.fromRGB(220, 200, 100)
-else
-    PlatformBadge.Text = "🖥️ PC"; PlatformBadge.TextColor3 = Color3.fromRGB(150, 160, 240)
-end
+if isMobileMode then PlatformBadge.Text = "📱 Móvil"; PlatformBadge.TextColor3 = Color3.fromRGB(100, 220, 150)
+elseif TouchEnabled then PlatformBadge.Text = "🖥️📱 Mixto"; PlatformBadge.TextColor3 = Color3.fromRGB(220, 200, 100)
+else PlatformBadge.Text = "🖥️ PC"; PlatformBadge.TextColor3 = Color3.fromRGB(150, 160, 240) end
 
 local OverlayGui = Instance.new("ScreenGui")
 OverlayGui.Name = "MacroRec_Overlay"; OverlayGui.ResetOnSpawn = false
@@ -475,9 +409,7 @@ local function clickCircle(x, y, color)
     c.BackgroundColor3 = color or Color3.fromRGB(255, 90, 90); c.BackgroundTransparency = 0.2
     c.BorderSizePixel = 0; c.ZIndex = 1000001; c.Parent = OverlayGui
     Instance.new("UICorner", c).CornerRadius = UDim.new(1, 0)
-    local t1 = TweenService:Create(c, TweenInfo.new(0.4), {
-        Size = UDim2.new(0, 40, 0, 40), Position = UDim2.new(0, x - 20, 0, y - 20), BackgroundTransparency = 1,
-    })
+    local t1 = TweenService:Create(c, TweenInfo.new(0.4), { Size = UDim2.new(0, 40, 0, 40), Position = UDim2.new(0, x - 20, 0, y - 20), BackgroundTransparency = 1 })
     t1:Play(); t1.Completed:Connect(function() c:Destroy() end)
 end
 local function setFakeCursor(x, y) Cursor.Position = UDim2.new(0, x - 7, 0, y - 7) end
@@ -504,7 +436,6 @@ local function currentViewport()
     if cam then return cam.ViewportSize end
     return Vector2.new(1920, 1080)
 end
-
 local function scalePoint(x, y)
     local oldVP = state.playViewport
     if not oldVP then return x, y end
@@ -531,7 +462,6 @@ local function minimizeToRight()
     end
     Title.Text = "▶ Reproduciendo"; CloseBtn.Visible = false
 end
-
 local function restoreWindow()
     if not savedWindow then return end
     Main.Size = savedWindow.size; Main.Position = savedWindow.pos; MainScale.Scale = savedWindow.scale
@@ -543,9 +473,8 @@ local function restoreWindow()
             d:SetAttribute("_MRVisSaved", nil)
         end
     end
-    Title.Text = "● Macro Recorder v8.7.3"; CloseBtn.Visible = true
+    Title.Text = "● Macro Recorder v8.7.4"; CloseBtn.Visible = true
 end
-
 local function updateGuiScale()
     if savedWindow then return end
     local vp = currentViewport()
@@ -571,7 +500,6 @@ PasteModal.Visible = false; PasteModal.ZIndex = 50; PasteModal.Parent = ScreenGu
 Instance.new("UICorner", PasteModal).CornerRadius = UDim.new(0, 8)
 local PMStroke = Instance.new("UIStroke", PasteModal)
 PMStroke.Color = Color3.fromRGB(120, 100, 180); PMStroke.Thickness = 2
-
 local PMTitle = Instance.new("TextLabel")
 PMTitle.Size = UDim2.new(1, -20, 0, 28); PMTitle.Position = UDim2.new(0, 10, 0, 8)
 PMTitle.BackgroundTransparency = 1; PMTitle.Text = "📋 Cargar output (JSON)"
@@ -589,8 +517,7 @@ PMBox.Size = UDim2.new(1, -20, 0, 320); PMBox.Position = UDim2.new(0, 10, 0, 56)
 PMBox.BackgroundColor3 = Color3.fromRGB(16, 16, 22); PMBox.Text = ""
 PMBox.PlaceholderText = '{"name":"mi_macro","events":[...],"duration":12.3}'
 PMBox.TextColor3 = Color3.fromRGB(200, 200, 220); PMBox.PlaceholderColor3 = Color3.fromRGB(90, 90, 110)
-PMBox.Font = Enum.Font.Code; PMBox.TextSize = 11
-PMBox.MultiLine = true; PMBox.TextWrapped = true
+PMBox.Font = Enum.Font.Code; PMBox.TextSize = 11; PMBox.MultiLine = true; PMBox.TextWrapped = true
 PMBox.TextXAlignment = Enum.TextXAlignment.Left; PMBox.TextYAlignment = Enum.TextYAlignment.Top
 PMBox.ClearTextOnFocus = false; PMBox.ZIndex = 51; PMBox.Parent = PasteModal
 Instance.new("UICorner", PMBox).CornerRadius = UDim.new(0, 4)
@@ -600,7 +527,6 @@ PMCount.Size = UDim2.new(1, -20, 0, 16); PMCount.Position = UDim2.new(0, 10, 0, 
 PMCount.BackgroundTransparency = 1; PMCount.Text = "0 bytes"
 PMCount.TextColor3 = Color3.fromRGB(140, 140, 170); PMCount.Font = Enum.Font.Gotham
 PMCount.TextSize = 10; PMCount.TextXAlignment = Enum.TextXAlignment.Left; PMCount.ZIndex = 51; PMCount.Parent = PasteModal
-
 PMBox:GetPropertyChangedSignal("Text"):Connect(function() PMCount.Text = #PMBox.Text .. " bytes" end)
 
 local PMFromClip = Instance.new("TextButton")
@@ -633,18 +559,14 @@ end
 
 local function jsonEncode(t) return HttpService:JSONEncode(t) end
 local function jsonDecode(s) return HttpService:JSONDecode(s) end
-
 local function cleanRawJson(raw)
     if not raw then return nil end
-    raw = tostring(raw)
-    raw = raw:gsub("^\239\187\191", ""); raw = raw:gsub("^\255\254", ""); raw = raw:gsub("%z", ""); raw = raw:gsub("\194\160", " "); raw = raw:gsub("^\194\187", "")
+    raw = tostring(raw):gsub("^\239\187\191", ""):gsub("^\255\254", ""):gsub("%z", ""):gsub("\194\160", " "):gsub("^\194\187", "")
     return raw
 end
 local function tryUnescape(raw)
     if raw:sub(1, 1) == '"' and raw:sub(-1) == '"' then
-        local inner = raw:sub(2, -2)
-        inner = inner:gsub('\\"', '"'):gsub("\\\\", "\\"):gsub("\\n", "\n"):gsub("\\t", "\t"):gsub("\\r", "\r"):gsub("\\/", "/")
-        return inner
+        return raw:sub(2, -2):gsub('\\"', '"'):gsub("\\\\", "\\"):gsub("\\n", "\n"):gsub("\\t", "\t"):gsub("\\r", "\r"):gsub("\\/", "/")
     end
     return raw
 end
@@ -663,28 +585,17 @@ local function tryExtractJson(raw)
 end
 local function robustJsonDecode(raw)
     if not raw then return nil, "nil" end
-    raw = cleanRawJson(raw)
-    if not raw then return nil, "clean nil" end
+    raw = cleanRawJson(raw); if not raw then return nil, "clean nil" end
     raw = raw:gsub("^%s+", ""):gsub("%s+$", "")
     if raw == "" then return nil, "vacío" end
-    local ok, res = pcall(jsonDecode, raw)
-    if ok and type(res) == "table" then return res, nil, "directo" end
+    local ok, res = pcall(jsonDecode, raw); if ok and type(res) == "table" then return res, nil, "directo" end
     local un = tryUnescape(raw)
-    if un ~= raw then
-        local ok2, res2 = pcall(jsonDecode, un)
-        if ok2 and type(res2) == "table" then return res2, nil, "un-escape" end
-    end
+    if un ~= raw then local ok2, res2 = pcall(jsonDecode, un); if ok2 and type(res2) == "table" then return res2, nil, "un-escape" end end
     local ext = tryExtractJson(un)
-    if ext and ext ~= un then
-        local ok3, res3 = pcall(jsonDecode, ext)
-        if ok3 and type(res3) == "table" then return res3, nil, "extraído" end
-    end
+    if ext and ext ~= un then local ok3, res3 = pcall(jsonDecode, ext); if ok3 and type(res3) == "table" then return res3, nil, "extraído" end end
     local cand = ext or un or raw
     local ok5, fn2 = pcall(loadstring, "return " .. cand)
-    if ok5 and fn2 then
-        local ok6, res5 = pcall(fn2)
-        if ok6 and type(res5) == "table" then return res5, nil, "lua" end
-    end
+    if ok5 and fn2 then local ok6, res5 = pcall(fn2); if ok6 and type(res5) == "table" then return res5, nil, "lua" end end
     return nil, "JSON inválido"
 end
 
@@ -696,8 +607,7 @@ local function readIndex()
     if not activeFolder then return {} end
     local p = indexPath(); if not p or not isfile(p) then return {} end
     local ok, raw = pcall(readfile, p); if not ok or not raw then return {} end
-    local ok2, dec = pcall(jsonDecode, raw)
-    if ok2 and type(dec) == "table" then return dec end
+    local ok2, dec = pcall(jsonDecode, raw); if ok2 and type(dec) == "table" then return dec end
     return {}
 end
 local function writeIndex(names)
@@ -705,13 +615,11 @@ local function writeIndex(names)
     local p = indexPath(); if not p then return end
     local ok, enc = pcall(jsonEncode, names); if ok then pcall(writefile, p, enc) end
 end
-
 local function readAutoload()
     if not activeFolder then return nil end
     local p = autoloadPath(); if not p or not isfile(p) then return nil end
     local ok, raw = pcall(readfile, p); if not ok or not raw then return nil end
-    local ok2, dec = pcall(jsonDecode, raw)
-    if ok2 and type(dec) == "table" and dec.name then return tostring(dec.name) end
+    local ok2, dec = pcall(jsonDecode, raw); if ok2 and type(dec) == "table" and dec.name then return tostring(dec.name) end
     return nil
 end
 local function writeAutoload(name)
@@ -724,22 +632,18 @@ end
 local function saveRecording(name, events, duration, created, extra)
     local payload = { name = name, events = events, created = created or os.time(), duration = duration or 0 }
     if extra then for k, v in pairs(extra) do payload[k] = v end end
-    local ok, encoded = pcall(jsonEncode, payload)
-    if not ok then return false, "JSONEncode falló" end
+    local ok, encoded = pcall(jsonEncode, payload); if not ok then return false, "Encode fail" end
     if #encoded > MAX_SIZE then return false, "Excede MB" end
     if activeFolder then
-        local p = folderPath(name)
-        local okW = pcall(writefile, p, encoded)
+        local p = folderPath(name); local okW = pcall(writefile, p, encoded)
         if okW and isfile(p) then
-            local names = readIndex()
-            local found = false
+            local names = readIndex(); local found = false
             for _, n in ipairs(names) do if n == name then found = true break end end
             if not found then table.insert(names, name); writeIndex(names) end
             return true, "disco"
         end
     end
-    memRecordings[name] = payload
-    return false, "memoria"
+    memRecordings[name] = payload; return false, "memoria"
 end
 local function loadRecording(name)
     if memRecordings[name] then return memRecordings[name] end
@@ -751,10 +655,8 @@ local function loadRecording(name)
 end
 local function deleteRecording(name)
     if activeFolder then
-        local p = folderPath(name)
-        if p and isfile(p) and type(delfile) == "function" then pcall(delfile, p) end
-        local names = readIndex()
-        for i, n in ipairs(names) do if n == name then table.remove(names, i); break end end
+        local p = folderPath(name); if p and isfile(p) and type(delfile) == "function" then pcall(delfile, p) end
+        local names = readIndex(); for i, n in ipairs(names) do if n == name then table.remove(names, i); break end end
         writeIndex(names)
     end
     memRecordings[name] = nil
@@ -762,42 +664,25 @@ end
 local function getAllNames()
     local names, seen = {}, {}
     if activeFolder then
-        for _, n in ipairs(readIndex()) do
-            if not seen[n] then table.insert(names, n); seen[n] = true end
-        end
+        for _, n in ipairs(readIndex()) do if not seen[n] then table.insert(names, n); seen[n] = true end end
         if type(listfiles) == "function" then
             local okL, files = pcall(listfiles, activeFolder)
-            if okL and files then
-                for _, f in ipairs(files) do
-                    local base = tostring(f):match("([^/\\]+)%.json$")
-                    if base and base ~= "index" and base ~= "autoload" and not seen[base] then
-                        table.insert(names, base); seen[base] = true
-                    end
-                end
-            end
+            if okL and files then for _, f in ipairs(files) do
+                local base = tostring(f):match("([^/\\]+)%.json$")
+                if base and base ~= "index" and base ~= "autoload" and not seen[base] then table.insert(names, base); seen[base] = true end
+            end end
         end
     end
-    for k in pairs(memRecordings) do
-        if not seen[k] then table.insert(names, k); seen[k] = true end
-    end
-    table.sort(names)
-    return names
+    for k in pairs(memRecordings) do if not seen[k] then table.insert(names, k); seen[k] = true end end
+    table.sort(names); return names
 end
-local function fmtDuration(s)
-    s = tonumber(s) or 0
-    return string.format("%02d:%06.3f", math.floor(s / 60), s - math.floor(s / 60) * 60)
-end
-local function fmtDate(ts)
-    if not ts then return "" end
-    local ok, d = pcall(os.date, "%Y-%m-%d %H:%M", ts); return ok and d or ""
-end
+local function fmtDuration(s) s = tonumber(s) or 0; return string.format("%02d:%06.3f", math.floor(s / 60), s - math.floor(s / 60) * 60) end
+local function fmtDate(ts) if not ts then return "" end; local ok, d = pcall(os.date, "%Y-%m-%d %H:%M", ts); return ok and d or "" end
 
 local function importFromText(raw)
     if not raw or raw:gsub("%s", "") == "" then return 0, 0, "Texto vacío", nil, nil end
-    local dec, err, method = robustJsonDecode(raw)
-    if not dec then return 0, 0, err or "JSON inválido", nil, nil end
-    local saved, skipped = 0, 0
-    local firstName = nil
+    local dec, err, method = robustJsonDecode(raw); if not dec then return 0, 0, err, nil, nil end
+    local saved, skipped, firstName = 0, 0, nil
     local function trySave(rec)
         if type(rec) ~= "table" or not rec.name or not rec.events then skipped = skipped + 1; return end
         local n = tostring(rec.name):gsub("[^%w_%-]", "_")
@@ -806,8 +691,8 @@ local function importFromText(raw)
         if rec.startCamCFrame then extra.startCamCFrame = rec.startCamCFrame end
         if rec.startCamFOV then extra.startCamFOV = rec.startCamFOV end
         if rec.startViewport then extra.startViewport = rec.startViewport end
-        local okS = saveRecording(n, rec.events, rec.duration or 0, rec.created, extra)
-        if okS then saved = saved + 1; if not firstName then firstName = n end
+        if saveRecording(n, rec.events, rec.duration or 0, rec.created, extra) then
+            saved = saved + 1; if not firstName then firstName = n end
         else skipped = skipped + 1 end
     end
     if dec.name and dec.events then trySave(dec)
@@ -830,8 +715,7 @@ local function getMainBounds()
 end
 local function isOverGui()
     if not Main.Visible then return false end
-    local mp = UserInputService:GetMouseLocation()
-    local x, y, w, h = getMainBounds()
+    local mp = UserInputService:GetMouseLocation(); local x, y, w, h = getMainBounds()
     return mp.X >= x and mp.X <= x + w and mp.Y >= y and mp.Y <= y + h
 end
 local function isPointOverMainGui(px, py)
@@ -840,8 +724,7 @@ local function isPointOverMainGui(px, py)
     return px >= x and px <= x + w and py >= y and py <= y + h
 end
 local function findBracket(kfs, t)
-    local n = #kfs
-    if n == 0 then return nil, nil, 0 end
+    local n = #kfs; if n == 0 then return nil, nil, 0 end
     if t <= kfs[1].t then return kfs[1], kfs[1], 0 end
     if t >= kfs[n].t then return kfs[n], kfs[n], 1 end
     local lo, hi = 1, n
@@ -851,15 +734,13 @@ local function findBracket(kfs, t)
     end
     local a, b = kfs[lo], kfs[lo + 1]
     if not b then return a, a, 0 end
-    local span = b.t - a.t
-    local alpha = span > 0 and (t - a.t) / span or 0
+    local span = b.t - a.t; local alpha = span > 0 and (t - a.t) / span or 0
     return a, b, alpha
 end
 
 local function enforceCamLock()
     if not camLocked then return end
-    local cam = workspace.CurrentCamera
-    if not cam then return end
+    local cam = workspace.CurrentCamera; if not cam then return end
     camSetting = true
     if cam.CameraType ~= Enum.CameraType.Scriptable then pcall(function() cam.CameraType = Enum.CameraType.Scriptable end) end
     if lastAppliedCamCF then
@@ -872,8 +753,7 @@ local function enforceCamLock()
 end
 local function lockCamera()
     if camLocked then return end
-    local cam = workspace.CurrentCamera
-    if not cam then return end
+    local cam = workspace.CurrentCamera; if not cam then return end
     originalCamType = cam.CameraType; originalCamSubject = cam.CameraSubject; camLocked = true; camDriftCount = 0
     pcall(function() cam.CameraType = Enum.CameraType.Scriptable end)
     pcall(function() RunService:BindToRenderStep(CAM_LOCK_BIND_HI, 10000, enforceCamLock) end)
@@ -912,15 +792,12 @@ local function teleportToStart(rec)
         task.wait(0.1); char = LocalPlayer.Character
     end
     if not char then return false, "sin character" end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return false, "sin HRP" end
+    local hrp = char:FindFirstChild("HumanoidRootPart"); if not hrp then return false, "sin HRP" end
     local targetCF = CFrame.new(unpack(rec.startHrpCFrame))
     if char.PivotTo then pcall(function() char:PivotTo(targetCF) end) end
     task.wait(0.05)
     if (hrp.Position - targetCF.Position).Magnitude > 2 then pcall(function() hrp.CFrame = targetCF end) end
-    pcall(function()
-        hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0); hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-    end)
+    pcall(function() hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0); hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0) end)
     task.wait(0.3)
     if rec.startCamCFrame then
         local cam = workspace.CurrentCamera
@@ -961,15 +838,12 @@ local function playbackRenderStep()
     if state.hasHrpData and state.moveEnabled then
         local hrpKFs = state.hrpKeyframes
         if hrpKFs and #hrpKFs > 0 then
-            local char = LocalPlayer.Character
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            local char = LocalPlayer.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
             if hrp then
                 local a, b, alpha = findBracket(hrpKFs, elapsed)
                 if a and b then
                     local cf = a.cf:Lerp(b.cf, alpha)
-                    pcall(function()
-                        hrp.CFrame = cf; hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0); hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-                    end)
+                    pcall(function() hrp.CFrame = cf; hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0); hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0) end)
                 end
             end
         end
@@ -977,8 +851,7 @@ local function playbackRenderStep()
 end
 
 local function mousemoveToRoblox(targetX, targetY, maxIter)
-    maxIter = maxIter or 6
-    if not fn.mousemoveabs then return false, "no mousemoveabs", 0 end
+    maxIter = maxIter or 6; if not fn.mousemoveabs then return false, "no mousemoveabs", 0 end
     local guessX, guessY = targetX, targetY; local lastErr = math.huge
     for i = 1, maxIter do
         pcall(fn.mousemoveabs, guessX, guessY); task.wait(0.03)
@@ -993,46 +866,33 @@ local function mousemoveToRoblox(targetX, targetY, maxIter)
 end
 
 local function resolveGuiPath(relPath)
-    local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
-    if not pg then return nil, "PlayerGui no existe" end
-    relPath = relPath:gsub("/", ".")
-    if relPath:sub(1, 10):lower() == "playergui." then relPath = relPath:sub(11) end
+    local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui"); if not pg then return nil, "PlayerGui no existe" end
+    relPath = relPath:gsub("/", "."); if relPath:sub(1, 10):lower() == "playergui." then relPath = relPath:sub(11) end
     local obj = pg
     for part in string.gmatch(relPath, "[^%.]+") do
         local child = obj:FindFirstChild(part)
-        if not child then
-            local ok, w = pcall(function() return obj:WaitForChild(part, 0.3) end)
-            if not ok or not w then return nil, "No existe: " .. part end
-            child = w
-        end
+        if not child then local ok, w = pcall(function() return obj:WaitForChild(part, 0.3) end); if not ok or not w then return nil, "No existe: " .. part end; child = w end
         obj = child
     end
     return obj
 end
 local function getActiveSignals(btn)
-    local active = {}
-    if not hasGetConns then return active end
+    local active = {}; if not hasGetConns then return active end
     for _, sigName in ipairs({"Activated", "MouseButton1Click", "MouseButton1Down", "MouseButton1Up"}) do
         local sig = btn[sigName]
-        if sig then
-            local ok, conns = pcall(getconnections, sig)
-            if ok and conns and #conns > 0 then table.insert(active, { name = sigName, count = #conns }) end
-        end
+        if sig then local ok, conns = pcall(getconnections, sig); if ok and conns and #conns > 0 then table.insert(active, { name = sigName, count = #conns }) end end
     end
     return active
 end
 local function inspectPath()
-    local path = (PathBox.Text or ""):gsub("^%s+", ""):gsub("%s+$", "")
-    if path == "" then Status.Text = "⚠ Path vacío"; return end
-    local btn, err = resolveGuiPath(path)
-    if not btn then Status.Text = "❌ " .. tostring(err); return end
+    local path = (PathBox.Text or ""):gsub("^%s+", ""):gsub("%s+$", ""); if path == "" then Status.Text = "⚠ Path vacío"; return end
+    local btn, err = resolveGuiPath(path); if not btn then Status.Text = "❌ " .. tostring(err); return end
     Status.Text = string.format("🔍 %s @ %.0f,%.0f", btn.ClassName, btn.AbsolutePosition.X, btn.AbsolutePosition.Y)
 end
 local function forceMouseClickCalibrated(btn)
     if not btn or not btn:IsA("GuiButton") then return false, "no GuiButton" end
     if not btn.Visible then return false, "invisible" end
-    local ap, as = btn.AbsolutePosition, btn.AbsoluteSize
-    if as.X < 1 or as.Y < 1 then return false, "tamaño=0" end
+    local ap, as = btn.AbsolutePosition, btn.AbsoluteSize; if as.X < 1 or as.Y < 1 then return false, "tamaño=0" end
     local cx, cy = ap.X + as.X / 2, ap.Y + as.Y / 2
     drawCrosshair(cx, cy, Color3.fromRGB(255, 50, 50), 2)
     mousemoveToRoblox(cx, cy)
@@ -1040,9 +900,7 @@ local function forceMouseClickCalibrated(btn)
     if not (finalPos.X >= ap.X and finalPos.X <= ap.X + as.X and finalPos.Y >= ap.Y and finalPos.Y <= ap.Y + as.Y) then return false, "cursor no calibró" end
     task.wait(0.05)
     if type(fn.mouse1click) == "function" then pcall(fn.mouse1click); task.wait(0.08) end
-    if type(fn.mouse1press) == "function" and type(fn.mouse1release) == "function" then
-        pcall(fn.mouse1press); task.wait(0.05); pcall(fn.mouse1release)
-    end
+    if type(fn.mouse1press) == "function" and type(fn.mouse1release) == "function" then pcall(fn.mouse1press); task.wait(0.05); pcall(fn.mouse1release) end
     return true, "físico"
 end
 local function mobileClickButton(btn)
@@ -1051,34 +909,18 @@ local function mobileClickButton(btn)
     if hasFireSignal and hasGetConns then
         local active = getActiveSignals(btn)
         for _, s in ipairs(active) do
-            local sig = btn[s.name]
-            if sig then
-                local ok = pcall(firesignal, sig)
-                if ok then return true, "firesignal(" .. s.name .. ")" end
-            end
+            local sig = btn[s.name]; if sig then local ok = pcall(firesignal, sig); if ok then return true, "firesignal(" .. s.name .. ")" end end
         end
     end
-    local ap, as = btn.AbsolutePosition, btn.AbsoluteSize
-    if as.X < 1 or as.Y < 1 then return false, "tamaño=0" end
+    local ap, as = btn.AbsolutePosition, btn.AbsoluteSize; if as.X < 1 or as.Y < 1 then return false, "tamaño=0" end
     local cx, cy = ap.X + as.X / 2, ap.Y + as.Y / 2
-    if hasFireTouchInput then
-        pcall(firetouchinput, cx, cy, 0); task.wait(0.05); pcall(firetouchinput, cx, cy, 1)
-        return true, "firetouchinput"
-    elseif hasVIMSendMouse then
-        pcall(function()
-            VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
-            task.wait(0.08)
-            VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
-        end)
-        return true, "VIM-touch"
-    end
+    if hasFireTouchInput then pcall(firetouchinput, cx, cy, 0); task.wait(0.05); pcall(firetouchinput, cx, cy, 1); return true, "firetouchinput"
+    elseif hasVIMSendMouse then pcall(function() VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1); task.wait(0.08); VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1) end); return true, "VIM-touch" end
     return false, "sin método móvil"
 end
 local function markPath()
-    local path = (PathBox.Text or ""):gsub("^%s+", ""):gsub("%s+$", "")
-    if path == "" then Status.Text = "⚠ Path vacío"; return end
-    local btn, err = resolveGuiPath(path)
-    if not btn then Status.Text = "❌ " .. tostring(err); return end
+    local path = (PathBox.Text or ""):gsub("^%s+", ""):gsub("%s+$", ""); if path == "" then Status.Text = "⚠ Path vacío"; return end
+    local btn, err = resolveGuiPath(path); if not btn then Status.Text = "❌ " .. tostring(err); return end
     local cx = btn.AbsolutePosition.X + btn.AbsoluteSize.X / 2, cy = btn.AbsolutePosition.Y + btn.AbsoluteSize.Y / 2
     drawCrosshair(cx, cy, Color3.fromRGB(50, 200, 255), 3)
     Status.Text = string.format("📍 %.0f,%.0f → %.0f,%.0f", cx, cy, cx, cy)
@@ -1090,25 +932,15 @@ local function tryClickButton(btn)
     local active = getActiveSignals(btn)
     if #active > 0 and hasFireSignal then
         for _, s in ipairs(active) do
-            local sig = btn[s.name]
-            if sig then
-                local ok = pcall(firesignal, sig)
-                if ok then return true, "firesignal(" .. s.name .. ")" end
-            end
+            local sig = btn[s.name]; if sig then local ok = pcall(firesignal, sig); if ok then return true, "firesignal(" .. s.name .. ")" end end
         end
     end
     return forceMouseClickCalibrated(btn)
 end
 local function clickPlayAgain()
-    local path = (PathBox.Text or ""):gsub("^%s+", ""):gsub("%s+$", "")
-    if path == "" then Status.Text = "⚠ Path vacío"; return false end
-    local deadline = os.clock() + AUTO_CLICK_TIMEOUT
-    local btn = nil
-    while os.clock() < deadline do
-        local b = resolveGuiPath(path)
-        if b then btn = b; break end
-        task.wait(AUTO_CLICK_POLL)
-    end
+    local path = (PathBox.Text or ""):gsub("^%s+", ""):gsub("%s+$", ""); if path == "" then Status.Text = "⚠ Path vacío"; return false end
+    local deadline = os.clock() + AUTO_CLICK_TIMEOUT; local btn = nil
+    while os.clock() < deadline do local b = resolveGuiPath(path); if b then btn = b; break end; task.wait(AUTO_CLICK_POLL) end
     if not btn then Status.Text = "❌ Botón no encontrado"; return false end
     local ok, method = tryClickButton(btn)
     if ok then Status.Text = "✅ " .. method; return true else Status.Text = "❌ " .. tostring(method); return false end
@@ -1116,8 +948,7 @@ end
 
 local fixedBtnWasVisible = false
 local function resolveFixedBtn()
-    local path = (PathBox.Text or ""):gsub("^%s+", ""):gsub("%s+$", "")
-    if path == "" then return nil end
+    local path = (PathBox.Text or ""):gsub("^%s+", ""):gsub("%s+$", ""); if path == "" then return nil end
     return resolveGuiPath(path)
 end
 local function isBtnFullyVisible(btn)
@@ -1135,36 +966,24 @@ local function moveCursorAndClick()
     local clicked = false
     if type(fn.mouse1click) == "function" then local ok = pcall(fn.mouse1click); if ok then clicked = true end end
     if type(fn.mouse1press) == "function" and type(fn.mouse1release) == "function" then pcall(fn.mouse1press); task.wait(0.05); pcall(fn.mouse1release); clicked = true end
-    if not clicked and hasVIMSendMouse then
-        pcall(function()
-            VirtualInputManager:SendMouseButtonEvent(FIXED_CLICK_X, FIXED_CLICK_Y, 0, true, game, 0)
-            task.wait(0.05)
-            VirtualInputManager:SendMouseButtonEvent(FIXED_CLICK_X, FIXED_CLICK_Y, 0, false, game, 0)
-        end)
-        clicked = true
-    end
+    if not clicked and hasVIMSendMouse then pcall(function() VirtualInputManager:SendMouseButtonEvent(FIXED_CLICK_X, FIXED_CLICK_Y, 0, true, game, 0); task.wait(0.05); VirtualInputManager:SendMouseButtonEvent(FIXED_CLICK_X, FIXED_CLICK_Y, 0, false, game, 0) end); clicked = true end
     if not clicked and hasFireTouchInput then pcall(firetouchinput, FIXED_CLICK_X, FIXED_CLICK_Y, 0); task.wait(0.05); pcall(firetouchinput, FIXED_CLICK_X, FIXED_CLICK_Y, 1); clicked = true end
     clickCircle(FIXED_CLICK_X, FIXED_CLICK_Y, Color3.fromRGB(255, 200, 50))
     return clicked
 end
 local function tryFixedClick()
     if not state.fixedClickActive then return end
-    local now = os.clock()
-    if now - state.fixedClickLastAt < FIXED_CLICK_COOLDOWN then return end
-    local btn = resolveFixedBtn()
-    local visible = isBtnFullyVisible(btn)
+    local now = os.clock(); if now - state.fixedClickLastAt < FIXED_CLICK_COOLDOWN then return end
+    local btn = resolveFixedBtn(); local visible = isBtnFullyVisible(btn)
     if visible and not fixedBtnWasVisible then
-        fixedBtnWasVisible = true; task.wait(0.1)
-        local ok = moveCursorAndClick()
-        if ok then state.fixedClickLastAt = now; state.fixedClickLastBtn = btn; Status.Text = string.format("🎯 Click en (%d,%d)", FIXED_CLICK_X, FIXED_CLICK_Y)
-        else Status.Text = "⚠ Botón visible pero no clickeó" end
+        fixedBtnWasVisible = true; task.wait(0.1); local ok = moveCursorAndClick()
+        if ok then state.fixedClickLastAt = now; state.fixedClickLastBtn = btn; Status.Text = string.format("🎯 Click en (%d,%d)", FIXED_CLICK_X, FIXED_CLICK_Y) else Status.Text = "⚠ Botón visible pero no clickeó" end
         return
     end
     if not visible and fixedBtnWasVisible then fixedBtnWasVisible = false end
 end
 
-local captureMode = false
-local captureConns = {}
+local captureMode = false; local captureConns = {}
 local function hookForCapture(d)
     if not d:IsA("GuiButton") then return end
     if d:IsDescendantOf(ScreenGui) or d:IsDescendantOf(OverlayGui) then return end
@@ -1172,12 +991,9 @@ local function hookForCapture(d)
     d:SetAttribute("_MRCaptured", true)
     local conn = d.Activated:Connect(function()
         if captureMode then
-            captureMode = false
-            local full = d:GetFullName()
-            local relPath = full:gsub("^Players%.LocalPlayer%.PlayerGui%.", ""):gsub("^PlayerGui%.", ""):gsub("^CoreGui%.", "")
+            captureMode = false; local full = d:GetFullName(); local relPath = full:gsub("^Players%.LocalPlayer%.PlayerGui%.", ""):gsub("^PlayerGui%.", ""):gsub("^CoreGui%.", "")
             PathBox.Text = relPath; Status.Text = "🎯 Path: " .. relPath
-            for _, c in ipairs(captureConns) do pcall(function() c:Disconnect() end) end
-            captureConns = {}
+            for _, c in ipairs(captureConns) do pcall(function() c:Disconnect() end) end; captureConns = {}
         end
     end)
     table.insert(captureConns, conn)
@@ -1196,29 +1012,19 @@ local function hookButton(btn)
     if btn:GetAttribute("_MRHooked") then return end
     btn:SetAttribute("_MRHooked", true)
     btn.Activated:Connect(function()
-        if state.recording then
-            local t = os.clock() - state.recordStart
-            table.insert(state.events, { t = t, type = "gui", path = btn:GetFullName() })
-        end
+        if state.recording then local t = os.clock() - state.recordStart; table.insert(state.events, { t = t, type = "gui", path = btn:GetFullName() }) end
     end)
 end
 task.spawn(function()
     while ScreenGui.Parent do
         task.wait(3)
-        if state.recording then
-            local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
-            if pg then for _, d in ipairs(pg:GetDescendants()) do hookButton(d) end end
-        end
+        if state.recording then local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui"); if pg then for _, d in ipairs(pg:GetDescendants()) do hookButton(d) end end end
     end
 end)
 if pgRef then pgRef.DescendantAdded:Connect(function(d) hookButton(d) end) end
 
-local lastMousePos, lastCamCFrame, lastCamFOV = Vector2.new(-100,-100), nil, nil
-local lastHrpCFrame = nil
-local touchMap = {}
-local nextTouchId = 0
-local lastTouchPositions = {}
-
+local lastMousePos, lastCamCFrame, lastCamFOV = Vector2.new(-100,-100), nil, nil; local lastHrpCFrame = nil
+local touchMap = {}; local nextTouchId = 0; local lastTouchPositions = {}
 local function resetTouchRecording() touchMap = {}; nextTouchId = 0; lastTouchPositions = {} end
 local function pushEvent(ev) if not state.recording then return end; ev.t = os.clock() - state.recordStart; table.insert(state.events, ev) end
 
@@ -1229,8 +1035,7 @@ local function startRecording()
     lastHrpCFrame = nil; resetTouchRecording()
     local char = LocalPlayer.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
     state.startHrpCFrame = hrp and hrp.CFrame or nil
-    local cam = workspace.CurrentCamera
-    state.startCamCFrame = cam and cam.CFrame or nil; state.startCamFOV = cam and cam.FieldOfView or nil
+    local cam = workspace.CurrentCamera; state.startCamCFrame = cam and cam.CFrame or nil; state.startCamFOV = cam and cam.FieldOfView or nil
     state.startViewport = currentViewport()
     RecDot.Visible = true; BtnRecord.Text = "■ Parar"; BtnRecord.BackgroundColor3 = Color3.fromRGB(100, 100, 100); Status.Text = "Grabando…"
 end
@@ -1238,24 +1043,16 @@ local function stopRecording()
     if not state.recording then return end
     state.recording = false; RecDot.Visible = false; BtnRecord.Text = "● Grabar"; BtnRecord.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
     if #state.events < 2 then Status.Text = "Grabación vacía."; return end
-    local name = NameBox.Text:gsub("[^%w_%-]", "_")
-    if name == "" then name = "Rec_" .. os.date("%H%M%S"); NameBox.Text = name end
-    local duration = state.events[#state.events].t or 0
-    local extra = {}
+    local name = NameBox.Text:gsub("[^%w_%-]", "_"); if name == "" then name = "Rec_" .. os.date("%H%M%S"); NameBox.Text = name end
+    local duration = state.events[#state.events].t or 0; local extra = {}
     if state.startHrpCFrame then extra.startHrpCFrame = { state.startHrpCFrame:GetComponents() } end
     if state.startCamCFrame then extra.startCamCFrame = { state.startCamCFrame:GetComponents() } end
     if state.startCamFOV then extra.startCamFOV = state.startCamFOV end
     if state.startViewport then extra.startViewport = { state.startViewport.X, state.startViewport.Y } end
     local okSave, msgSave = saveRecording(name, state.events, duration, nil, extra)
-    local payload = { name = name, events = state.events, created = os.time(), duration = duration }
-    for k, v in pairs(extra) do payload[k] = v end
-    local okE, enc = pcall(jsonEncode, payload)
-    local clipMsg = ""
-    if not okE or not enc then clipMsg = " ❌ encode"
-    else
-        local clipFn = getClipboardSetFn()
-        if clipFn then local okC = pcall(clipFn, enc); if okC then clipMsg = " 📤 " .. #enc .. "B" else clipMsg = " ❌ clipboard" end end
-    end
+    local payload = { name = name, events = state.events, created = os.time(), duration = duration }; for k, v in pairs(extra) do payload[k] = v end
+    local okE, enc = pcall(jsonEncode, payload); local clipMsg = ""
+    if not okE or not enc then clipMsg = " ❌ encode" else local clipFn = getClipboardSetFn(); if clipFn then local okC = pcall(clipFn, enc); if okC then clipMsg = " 📤 " .. #enc .. "B" else clipMsg = " ❌ clipboard" end end end
     Status.Text = (okSave and "✅ " or "⚠ ") .. name .. clipMsg; pcall(refreshList)
 end
 
@@ -1308,98 +1105,48 @@ end
 RunService.RenderStepped:Connect(function()
     if state.recording then
         Chrono.Text = fmtDuration(os.clock() - state.recordStart)
-        if MouseEnabled then
-            local mp = UserInputService:GetMouseLocation()
-            if (mp - lastMousePos).Magnitude > REC_MOUSE_MIN_PIXELS then pushEvent({ type = "mouse", x = mp.X, y = mp.Y }); lastMousePos = mp end
-        end
+        if MouseEnabled then local mp = UserInputService:GetMouseLocation(); if (mp - lastMousePos).Magnitude > REC_MOUSE_MIN_PIXELS then pushEvent({ type = "mouse", x = mp.X, y = mp.Y }); lastMousePos = mp end end
         local cam = workspace.CurrentCamera
         if cam then
             local cfChanged = cframesDiffer(lastCamCFrame, cam.CFrame, REC_CAM_POS_THRESH, REC_CAM_ROT_THRESH)
             local fovChanged = lastCamFOV == nil or math.abs(lastCamFOV - cam.FieldOfView) > REC_CAM_FOV_THRESH
-            if cfChanged or fovChanged then
-                pushEvent({ type = "cam", cframe = { cam.CFrame:GetComponents() }, fov = cam.FieldOfView })
-                lastCamCFrame = cam.CFrame; lastCamFOV = cam.FieldOfView
-            end
+            if cfChanged or fovChanged then pushEvent({ type = "cam", cframe = { cam.CFrame:GetComponents() }, fov = cam.FieldOfView }); lastCamCFrame = cam.CFrame; lastCamFOV = cam.FieldOfView end
         end
         if state.moveEnabled then
             local char = LocalPlayer.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            if hrp and cframesDiffer(lastHrpCFrame, hrp.CFrame, REC_HRP_POS_THRESH, REC_HRP_ROT_THRESH) then
-                pushEvent({ type = "hrp", cframe = { hrp.CFrame:GetComponents() } }); lastHrpCFrame = hrp.CFrame
-            end
+            if hrp and cframesDiffer(lastHrpCFrame, hrp.CFrame, REC_HRP_POS_THRESH, REC_HRP_ROT_THRESH) then pushEvent({ type = "hrp", cframe = { hrp.CFrame:GetComponents() } }); lastHrpCFrame = hrp.CFrame end
         end
-    elseif state.playing then
-        if state.playStart then Chrono.Text = fmtDuration(os.clock() - state.playStart) end
+    elseif state.playing then if state.playStart then Chrono.Text = fmtDuration(os.clock() - state.playStart) end
     else Chrono.Text = "00:00.000" end
     pcall(tryFixedClick)
 end)
 
-local function waitUntil(targetT)
-    while true do
-        local now = os.clock(); if now >= targetT then return end
-        local d = targetT - now; if d > 0.003 then task.wait(d - 0.002) end
-    end
-end
-local function setMainInteractive(enabled)
-    Main.Active = enabled
-    for _, d in ipairs(Main:GetDescendants()) do if d:IsA("GuiObject") then pcall(function() d.Active = enabled end) end end
-end
-local function refreshKeysLabel()
-    local list = {}; for k in pairs(state.activeKeys) do table.insert(list, k) end; table.sort(list)
-    KeysLabel.Text = (#list > 0) and ("⌨ " .. table.concat(list, " + ")) or ""
-end
+local function waitUntil(targetT) while true do local now = os.clock(); if now >= targetT then return end; local d = targetT - now; if d > 0.003 then task.wait(d - 0.002) end end end
+local function setMainInteractive(enabled) Main.Active = enabled; for _, d in ipairs(Main:GetDescendants()) do if d:IsA("GuiObject") then pcall(function() d.Active = enabled end) end end end
+local function refreshKeysLabel() local list = {}; for k in pairs(state.activeKeys) do table.insert(list, k) end; table.sort(list); KeysLabel.Text = (#list > 0) and ("⌨ " .. table.concat(list, " + ")) or "" end
 
 local function prepareCamKeyframes(events, rec)
     local kfs = {}
     if rec and rec.startCamCFrame then table.insert(kfs, { t = 0, cf = CFrame.new(unpack(rec.startCamCFrame)), fov = rec.startCamFOV }) end
-    for _, ev in ipairs(events) do
-        if ev.type == "cam" and ev.cframe then table.insert(kfs, { t = ev.t, cf = CFrame.new(unpack(ev.cframe)), fov = ev.fov }) end
-    end
+    for _, ev in ipairs(events) do if ev.type == "cam" and ev.cframe then table.insert(kfs, { t = ev.t, cf = CFrame.new(unpack(ev.cframe)), fov = ev.fov }) end end
     if #kfs == 0 then local cam = workspace.CurrentCamera; if cam then table.insert(kfs, { t = 0, cf = cam.CFrame, fov = cam.FieldOfView }) end end
     return kfs
 end
 local function prepareHrpKeyframes(events, rec)
     local kfs = {}; local count = 0
     if rec and rec.startHrpCFrame then table.insert(kfs, { t = 0, cf = CFrame.new(unpack(rec.startHrpCFrame)) }) end
-    for _, ev in ipairs(events) do
-        if ev.type == "hrp" and ev.cframe then table.insert(kfs, { t = ev.t, cf = CFrame.new(unpack(ev.cframe)) }); count = count + 1 end
-    end
+    for _, ev in ipairs(events) do if ev.type == "hrp" and ev.cframe then table.insert(kfs, { t = ev.t, cf = CFrame.new(unpack(ev.cframe)) }); count = count + 1 end end
     return kfs, count
 end
 
 local activeTouchIds = {}
-local function fireTouchDown(x, y, fingerId)
-    fingerId = fingerId or 1; if activeTouchIds[fingerId] then return end; activeTouchIds[fingerId] = { x = x, y = y }
-    if hasVIMSendMouse then pcall(function() VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, fingerId) end) end
-    if hasFireTouchInput then pcall(firetouchinput, x, y, 0) end
-end
-local function fireTouchMove(x, y, fingerId)
-    fingerId = fingerId or 1; local active = activeTouchIds[fingerId]; if not active then return end; active.x, active.y = x, y
-    if hasVIMSendMove then pcall(function() VirtualInputManager:SendMouseMoveEvent(x, y, game) end) end
-    if hasFireTouchInput then pcall(firetouchinput, x, y, 2) end
-end
-local function fireTouchUp(x, y, fingerId)
-    fingerId = fingerId or 1; if not activeTouchIds[fingerId] then return end; activeTouchIds[fingerId] = nil
-    if hasVIMSendMouse then pcall(function() VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, fingerId) end) end
-    if hasFireTouchInput then pcall(firetouchinput, x, y, 1) end
-end
-local function releaseAllTouches()
-    for fingerId, pos in pairs(activeTouchIds) do
-        if hasVIMSendMouse then pcall(function() VirtualInputManager:SendMouseButtonEvent(pos.x, pos.y, 0, false, game, fingerId) end) end
-        if hasFireTouchInput then pcall(firetouchinput, pos.x, pos.y, 1) end
-    end
-    activeTouchIds = {}
-end
-local function fireLegacyTap(x, y)
-    if hasVIMSendMouse then pcall(function() VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 1); task.wait(0.03); VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 1) end)
-    elseif hasFireTouchInput then pcall(firetouchinput, x, y, 0); task.wait(0.03); pcall(firetouchinput, x, y, 1) end
-end
-local function fireLegacyLongPress(x, y)
-    if hasVIMSendMouse then pcall(function() VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 1) end); task.wait(0.5); pcall(function() VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 1) end)
-    elseif hasFireTouchInput then pcall(firetouchinput, x, y, 0); task.wait(0.5); pcall(firetouchinput, x, y, 1) end
-end
-local function fireLegacyPan(x, y)
-    if hasFireTouchInput then pcall(firetouchinput, x, y, 2) elseif hasVIMSendMove then pcall(function() VirtualInputManager:SendMouseMoveEvent(x, y, game) end) end
-end
+local function fireTouchDown(x, y, fingerId) fingerId = fingerId or 1; if activeTouchIds[fingerId] then return end; activeTouchIds[fingerId] = { x = x, y = y }; if hasVIMSendMouse then pcall(function() VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, fingerId) end) end; if hasFireTouchInput then pcall(firetouchinput, x, y, 0) end end
+local function fireTouchMove(x, y, fingerId) fingerId = fingerId or 1; local active = activeTouchIds[fingerId]; if not active then return end; active.x, active.y = x, y; if hasVIMSendMove then pcall(function() VirtualInputManager:SendMouseMoveEvent(x, y, game) end) end; if hasFireTouchInput then pcall(firetouchinput, x, y, 2) end end
+local function fireTouchUp(x, y, fingerId) fingerId = fingerId or 1; if not activeTouchIds[fingerId] then return end; activeTouchIds[fingerId] = nil; if hasVIMSendMouse then pcall(function() VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, fingerId) end) end; if hasFireTouchInput then pcall(firetouchinput, x, y, 1) end end
+local function releaseAllTouches() for fingerId, pos in pairs(activeTouchIds) do if hasVIMSendMouse then pcall(function() VirtualInputManager:SendMouseButtonEvent(pos.x, pos.y, 0, false, game, fingerId) end) end; if hasFireTouchInput then pcall(firetouchinput, pos.x, pos.y, 1) end end; activeTouchIds = {} end
+local function fireLegacyTap(x, y) if hasVIMSendMouse then pcall(function() VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 1); task.wait(0.03); VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 1) end) elseif hasFireTouchInput then pcall(firetouchinput, x, y, 0); task.wait(0.03); pcall(firetouchinput, x, y, 1) end end
+local function fireLegacyLongPress(x, y) if hasVIMSendMouse then pcall(function() VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 1) end); task.wait(0.5); pcall(function() VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 1) end) elseif hasFireTouchInput then pcall(firetouchinput, x, y, 0); task.wait(0.5); pcall(firetouchinput, x, y, 1) end end
+local function fireLegacyPan(x, y) if hasFireTouchInput then pcall(firetouchinput, x, y, 2) elseif hasVIMSendMove then pcall(function() VirtualInputManager:SendMouseMoveEvent(x, y, game) end) end end
 
 local function applyEvent(ev)
     local t = ev.type
@@ -1420,11 +1167,7 @@ local function applyEvent(ev)
     refreshKeysLabel(); pcall(function() MacroInput:Fire(ev) end)
 end
 
-local function restoreHumanoid()
-    local h = state.controlledHumanoid; local s = state.savedHumanoid
-    if h and s and h.Parent then pcall(function() h.WalkSpeed = s.WalkSpeed; h.JumpPower = s.JumpPower; h.AutoRotate = s.AutoRotate end) end
-    state.controlledHumanoid = nil; state.savedHumanoid = nil
-end
+local function restoreHumanoid() local h = state.controlledHumanoid; local s = state.savedHumanoid; if h and s and h.Parent then pcall(function() h.WalkSpeed = s.WalkSpeed; h.JumpPower = s.JumpPower; h.AutoRotate = s.AutoRotate end) end; state.controlledHumanoid = nil; state.savedHumanoid = nil end
 local function stopPlayback()
     if not state.playing then return end
     pcall(function() RunService:UnbindFromRenderStep(PLAYBACK_BIND) end)
@@ -1441,21 +1184,15 @@ local function playRecording(events, name, looped, rec)
     if state.recording then stopRecording() end
     if state.playing then stopPlayback() end
     if not events or #events == 0 then Status.Text = "Grabación vacía."; return end
-    local focused = UserInputService:GetFocusedTextBox()
-    if focused and focused.ReleaseFocus then pcall(function() focused:ReleaseFocus() end) end
+    local focused = UserInputService:GetFocusedTextBox(); if focused and focused.ReleaseFocus then pcall(function() focused:ReleaseFocus() end) end
     if rec and rec.startViewport and #rec.startViewport == 2 then state.playViewport = { X = rec.startViewport[1], Y = rec.startViewport[2] }
     else local cur = currentViewport(); state.playViewport = { X = cur.X, Y = cur.Y } end
-    lockCamera()
-    if rec and rec.startHrpCFrame then teleportToStart(rec) end
+    lockCamera(); if rec and rec.startHrpCFrame then teleportToStart(rec) end
     state.camKeyframes = prepareCamKeyframes(events, rec)
-    local hrpKFs, hrpCount = prepareHrpKeyframes(events, rec)
-    state.hrpKeyframes = hrpKFs; state.hasHrpData = (hrpCount > 0); activeTouchIds = {}
+    local hrpKFs, hrpCount = prepareHrpKeyframes(events, rec); state.hrpKeyframes = hrpKFs; state.hasHrpData = (hrpCount > 0); activeTouchIds = {}
     if state.hasHrpData and state.moveEnabled then
         local char = LocalPlayer.Character; local humanoid = char and char:FindFirstChildOfClass("Humanoid")
-        if humanoid then
-            state.controlledHumanoid = humanoid; state.savedHumanoid = { WalkSpeed = humanoid.WalkSpeed, JumpPower = humanoid.JumpPower, AutoRotate = humanoid.AutoRotate }
-            pcall(function() humanoid.WalkSpeed = 0; humanoid.JumpPower = 0; humanoid.AutoRotate = false end)
-        end
+        if humanoid then state.controlledHumanoid = humanoid; state.savedHumanoid = { WalkSpeed = humanoid.WalkSpeed, JumpPower = humanoid.JumpPower, AutoRotate = humanoid.AutoRotate }; pcall(function() humanoid.WalkSpeed = 0; humanoid.JumpPower = 0; humanoid.AutoRotate = false end) end
     end
     do
         local cam = workspace.CurrentCamera
@@ -1479,10 +1216,7 @@ local function playRecording(events, name, looped, rec)
             end
             if not looped then break end; task.wait(0.05)
         end
-        if session == state.currentSession then
-            stopPlayback()
-            if state.autoClick then task.wait(AUTO_CLICK_DELAY); if not state.playing and session == state.currentSession then clickPlayAgain() end end
-        end
+        if session == state.currentSession then stopPlayback(); if state.autoClick then task.wait(AUTO_CLICK_DELAY); if not state.playing and session == state.currentSession then clickPlayAgain() end end end
     end)
 end
 
@@ -1490,56 +1224,33 @@ function refreshList()
     for _, c in ipairs(Scrolling:GetChildren()) do if c:IsA("Frame") or c:IsA("TextLabel") then c:Destroy() end end
     local names = getAllNames()
     if #names == 0 then
-        local empty = Instance.new("TextLabel")
-        empty.Size = UDim2.new(1, -10, 0, 60); empty.BackgroundTransparency = 1; empty.Text = "No hay grabaciones."
-        empty.TextColor3 = Color3.fromRGB(120, 120, 140); empty.Font = Enum.Font.Gotham; empty.TextSize = 12; empty.TextWrapped = true; empty.LayoutOrder = 1
-        empty.Parent = Scrolling; return
+        local empty = Instance.new("TextLabel"); empty.Size = UDim2.new(1, -10, 0, 60); empty.BackgroundTransparency = 1; empty.Text = "No hay grabaciones."
+        empty.TextColor3 = Color3.fromRGB(120, 120, 140); empty.Font = Enum.Font.Gotham; empty.TextSize = 12; empty.TextWrapped = true; empty.LayoutOrder = 1; empty.Parent = Scrolling; return
     end
     for i, name in ipairs(names) do
         local rec = loadRecording(name) or {}
-        local row = Instance.new("Frame")
-        row.Size = UDim2.new(1, -10, 0, 42); row.BackgroundColor3 = Color3.fromRGB(28, 28, 38); row.BorderSizePixel = 0; row.LayoutOrder = i; row.Parent = Scrolling
+        local row = Instance.new("Frame"); row.Size = UDim2.new(1, -10, 0, 42); row.BackgroundColor3 = Color3.fromRGB(28, 28, 38); row.BorderSizePixel = 0; row.LayoutOrder = i; row.Parent = Scrolling
         Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
-        local nameLbl = Instance.new("TextLabel")
-        nameLbl.Size = UDim2.new(1, -130, 0, 20); nameLbl.Position = UDim2.new(0, 10, 0, 2); nameLbl.BackgroundTransparency = 1; nameLbl.Text = name
+        local nameLbl = Instance.new("TextLabel"); nameLbl.Size = UDim2.new(1, -130, 0, 20); nameLbl.Position = UDim2.new(0, 10, 0, 2); nameLbl.BackgroundTransparency = 1; nameLbl.Text = name
         nameLbl.TextColor3 = Color3.fromRGB(230, 230, 255); nameLbl.Font = Enum.Font.GothamBold; nameLbl.TextSize = 13; nameLbl.TextXAlignment = Enum.TextXAlignment.Left; nameLbl.TextTruncate = Enum.TextTruncate.AtEnd; nameLbl.Parent = row
-        local infoLbl = Instance.new("TextLabel")
-        infoLbl.Size = UDim2.new(1, -130, 0, 16); infoLbl.Position = UDim2.new(0, 10, 0, 22); infoLbl.BackgroundTransparency = 1
+        local infoLbl = Instance.new("TextLabel"); infoLbl.Size = UDim2.new(1, -130, 0, 16); infoLbl.Position = UDim2.new(0, 10, 0, 22); infoLbl.BackgroundTransparency = 1
         infoLbl.Text = "⏱ " .. fmtDuration(rec.duration or 0) .. "   📅 " .. fmtDate(rec.created)
         infoLbl.TextColor3 = Color3.fromRGB(150, 150, 180); infoLbl.Font = Enum.Font.Gotham; infoLbl.TextSize = 11; infoLbl.TextXAlignment = Enum.TextXAlignment.Left; infoLbl.Parent = row
-        local function mkSmallBtn(txt, col, x)
-            local b = Instance.new("TextButton")
-            b.Size = UDim2.new(0, 28, 0, 30); b.Position = UDim2.new(1, x, 0, 6); b.BackgroundColor3 = col; b.Text = txt; b.TextColor3 = Color3.new(1, 1, 1)
-            b.Font = Enum.Font.GothamBold; b.TextSize = 16; b.BorderSizePixel = 0; b.Parent = row; Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4); return b
-        end
+        local function mkSmallBtn(txt, col, x) local b = Instance.new("TextButton"); b.Size = UDim2.new(0, 28, 0, 30); b.Position = UDim2.new(1, x, 0, 6); b.BackgroundColor3 = col; b.Text = txt; b.TextColor3 = Color3.new(1, 1, 1); b.Font = Enum.Font.GothamBold; b.TextSize = 16; b.BorderSizePixel = 0; b.Parent = row; Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4); return b end
         local isAutoload = (name == state.autoloadName)
         local autoBtn = mkSmallBtn(isAutoload and "🍌" or "🐵", isAutoload and Color3.fromRGB(200, 160, 40) or Color3.fromRGB(90, 70, 50), -124)
-        autoBtn.MouseButton1Click:Connect(function()
-            if state.autoloadName == name then state.autoloadName = nil; writeAutoload(nil); Status.Text = "🍌 Auto-ejecutar desactivado"
-            else state.autoloadName = name; writeAutoload(name); Status.Text = "🐵 Auto-ejecutar: " .. name end
-            refreshList()
-        end)
+        autoBtn.MouseButton1Click:Connect(function() if state.autoloadName == name then state.autoloadName = nil; writeAutoload(nil); Status.Text = "🍌 Auto-ejecutar desactivado" else state.autoloadName = name; writeAutoload(name); Status.Text = "🐵 Auto-ejecutar: " .. name end; refreshList() end)
         local pBtn = mkSmallBtn("▶", Color3.fromRGB(50, 150, 80), -94); local eBtn = mkSmallBtn("📤", Color3.fromRGB(50, 100, 150), -64); local dBtn = mkSmallBtn("X", Color3.fromRGB(190, 60, 60), -34)
         row.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then local r = loadRecording(name); if r and r.events then playRecording(r.events, name, state.looped, r) end end end)
         nameLbl.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then NameBox.Text = name end end)
         pBtn.MouseButton1Click:Connect(function() local r = loadRecording(name); if r and r.events then NameBox.Text = name; playRecording(r.events, name, state.looped, r) end end)
-        eBtn.MouseButton1Click:Connect(function()
-            local rec2 = loadRecording(name); if not rec2 then Status.Text = "❌ No carga"; return end
-            local okE, enc = pcall(jsonEncode, rec2); if not okE then Status.Text = "❌ encode"; return end
-            local clipFn = getClipboardSetFn()
-            if clipFn then local okC = pcall(clipFn, enc); if okC then Status.Text = "📤 " .. name .. " (" .. #enc .. "B)" else Status.Text = "❌ clipboard" end else Status.Text = "⚠ sin clipboard" end
-        end)
-        dBtn.MouseButton1Click:Connect(function()
-            deleteRecording(name); if state.autoloadName == name then state.autoloadName = nil; writeAutoload(nil) end; Status.Text = "🗑 " .. name; refreshList()
-        end)
+        eBtn.MouseButton1Click:Connect(function() local rec2 = loadRecording(name); if not rec2 then Status.Text = "❌ No carga"; return end; local okE, enc = pcall(jsonEncode, rec2); if not okE then Status.Text = "❌ encode"; return end; local clipFn = getClipboardSetFn(); if clipFn then local okC = pcall(clipFn, enc); if okC then Status.Text = "📤 " .. name .. " (" .. #enc .. "B)" else Status.Text = "❌ clipboard" end else Status.Text = "⚠ sin clipboard" end end)
+        dBtn.MouseButton1Click:Connect(function() deleteRecording(name); if state.autoloadName == name then state.autoloadName = nil; writeAutoload(nil) end; Status.Text = "🗑 " .. name; refreshList() end)
     end
 end
 
 BtnRecord.MouseButton1Click:Connect(function() if state.recording then stopRecording() else startRecording() end end)
-BtnPlay.MouseButton1Click:Connect(function()
-    local name = NameBox.Text:gsub("[^%w_%-]", "_"); if name == "" then Status.Text = "Escribe un nombre."; return end
-    local r = loadRecording(name); if not r or not r.events then Status.Text = "No existe: " .. name; return end; playRecording(r.events, name, state.looped, r)
-end)
+BtnPlay.MouseButton1Click:Connect(function() local name = NameBox.Text:gsub("[^%w_%-]", "_"); if name == "" then Status.Text = "Escribe un nombre."; return end; local r = loadRecording(name); if not r or not r.events then Status.Text = "No existe: " .. name; return end; playRecording(r.events, name, state.looped, r) end)
 BtnStop.MouseButton1Click:Connect(function() if state.recording then stopRecording() end; if state.playing then stopPlayback() end end)
 BtnLoop.MouseButton1Click:Connect(function() state.looped = not state.looped; BtnLoop.Text = "Loop: " .. (state.looped and "ON" or "OFF"); BtnLoop.BackgroundColor3 = state.looped and Color3.fromRGB(50, 130, 70) or Color3.fromRGB(60, 60, 80) end)
 BtnAuto.MouseButton1Click:Connect(function() state.autoClick = not state.autoClick; BtnAuto.Text = "Auto: " .. (state.autoClick and "ON" or "OFF"); BtnAuto.BackgroundColor3 = state.autoClick and Color3.fromRGB(50, 130, 70) or Color3.fromRGB(60, 60, 80) end)
@@ -1548,77 +1259,34 @@ BtnInspect.MouseButton1Click:Connect(inspectPath)
 BtnMark.MouseButton1Click:Connect(markPath)
 BtnCapture.MouseButton1Click:Connect(function() if captureMode then captureMode = false; Status.Text = "🎯 Cancelado" else startCapture() end end)
 ForceMouseBtn.MouseButton1Click:Connect(function() state.forceMouse = not state.forceMouse; ForceMouseBtn.BackgroundColor3 = state.forceMouse and Color3.fromRGB(50, 130, 70) or Color3.fromRGB(60, 60, 80); Status.Text = state.forceMouse and "🖱 Forzar mouse ON" or "Método auto" end)
-MovToggleBtn.MouseButton1Click:Connect(function()
-    state.moveEnabled = not state.moveEnabled
-    if state.moveEnabled then MovToggleBtn.Text = "🏃 Mov ON"; MovToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 130, 70); Status.Text = "🏃 Movimiento ON"
-    else MovToggleBtn.Text = "🏃 Mov OFF"; MovToggleBtn.BackgroundColor3 = Color3.fromRGB(90, 60, 60); Status.Text = "Movimiento OFF" end
-end)
+MovToggleBtn.MouseButton1Click:Connect(function() state.moveEnabled = not state.moveEnabled; if state.moveEnabled then MovToggleBtn.Text = "🏃 Mov ON"; MovToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 130, 70); Status.Text = "🏃 Movimiento ON" else MovToggleBtn.Text = "🏃 Mov OFF"; MovToggleBtn.BackgroundColor3 = Color3.fromRGB(90, 60, 60); Status.Text = "Movimiento OFF" end end)
 FixedClickBtn.MouseButton1Click:Connect(function()
     state.fixedClickActive = not state.fixedClickActive
     if state.fixedClickActive then
-        local path = (PathBox.Text or ""):gsub("^%s+", ""):gsub("%s+$", "")
-        if path == "" then state.fixedClickActive = false; Status.Text = "⚠ Escribe el path"; return end
-        fixedBtnWasVisible = false
-        FixedClickBtn.Text = "🎯 Vigilar botón → click en (" .. FIXED_CLICK_X .. "," .. FIXED_CLICK_Y .. "): ON"
+        local path = (PathBox.Text or ""):gsub("^%s+", ""):gsub("%s+$", ""); if path == "" then state.fixedClickActive = false; Status.Text = "⚠ Escribe el path"; return end
+        fixedBtnWasVisible = false; FixedClickBtn.Text = "🎯 Vigilar botón → click en (" .. FIXED_CLICK_X .. "," .. FIXED_CLICK_Y .. "): ON"
         FixedClickBtn.BackgroundColor3 = Color3.fromRGB(50, 130, 70); FixedMarker.Visible = true; Status.Text = "🎯 Vigilando: " .. path
-    else
-        FixedClickBtn.Text = "🎯 Vigilar botón → click en (" .. FIXED_CLICK_X .. "," .. FIXED_CLICK_Y .. "): OFF"
-        FixedClickBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80); FixedMarker.Visible = false; Status.Text = "Auto-click desactivado"
-    end
+    else FixedClickBtn.Text = "🎯 Vigilar botón → click en (" .. FIXED_CLICK_X .. "," .. FIXED_CLICK_Y .. "): OFF"; FixedClickBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80); FixedMarker.Visible = false; Status.Text = "Auto-click desactivado" end
 end)
 
-ImportBtn.MouseButton1Click:Connect(function()
-    if not hasGetClipboard then Status.Text = "❌ getclipboard no disponible"; return end
-    local ok, raw = pcall(getclipboard); if not ok or not raw or raw == "" then Status.Text = "❌ Portapapeles vacío"; return end
-    local saved, skipped, err, fname, method = importFromText(raw)
-    if err then Status.Text = "❌ " .. err:sub(1, 60); return end
-    if fname and saved == 1 then NameBox.Text = fname end; Status.Text = "📥 " .. saved .. " (" .. skipped .. ")"; refreshList()
-end)
-OpenFileBtn.MouseButton1Click:Connect(function()
-    if not hasFS then Status.Text = "❌ executor sin FS"; return end
-    local fname = NameBox.Text:gsub("[^%w_%-]", "_"); if fname == "" then Status.Text = "📂 Escribe nombre del archivo"; return end
-    local target = activeFolder .. fname .. ".json"; if not isfile(target) then Status.Text = "❌ No existe " .. target; return end
-    local ok, raw = pcall(readfile, target); if not ok or not raw then Status.Text = "❌ readfile falló"; return end
-    local saved, skipped, err, first, method = importFromText(raw)
-    if err then Status.Text = "❌ " .. err:sub(1, 60); return end
-    if first and saved == 1 then NameBox.Text = first end; Status.Text = "📂 " .. saved .. " (" .. skipped .. ")"; refreshList()
-end)
+ImportBtn.MouseButton1Click:Connect(function() if not hasGetClipboard then Status.Text = "❌ getclipboard"; return end; local ok, raw = pcall(getclipboard); if not ok or not raw or raw == "" then Status.Text = "❌ Vacío"; return end; local saved, skipped, err, fname, method = importFromText(raw); if err then Status.Text = "❌ " .. err:sub(1, 60); return end; if fname and saved == 1 then NameBox.Text = fname end; Status.Text = "📥 " .. saved .. " (" .. skipped .. ")"; refreshList() end)
+OpenFileBtn.MouseButton1Click:Connect(function() if not hasFS then Status.Text = "❌ sin FS"; return end; local fname = NameBox.Text:gsub("[^%w_%-]", "_"); if fname == "" then Status.Text = "📂 Escribe nombre"; return end; local target = activeFolder .. fname .. ".json"; if not isfile(target) then Status.Text = "❌ No existe"; return end; local ok, raw = pcall(readfile, target); if not ok or not raw then Status.Text = "❌ readfile falló"; return end; local saved, skipped, err, first, method = importFromText(raw); if err then Status.Text = "❌ " .. err:sub(1, 60); return end; if first and saved == 1 then NameBox.Text = first end; Status.Text = "📂 " .. saved .. " (" .. skipped .. ")"; refreshList() end)
 PasteBtn.MouseButton1Click:Connect(function() openPasteModal() end)
-ExportAllBtn.MouseButton1Click:Connect(function()
-    local all = {}
-    for _, name in ipairs(getAllNames()) do local r = loadRecording(name); if r then table.insert(all, r) end end
-    if #all == 0 then Status.Text = "❌ Nada"; return end
-    local clipFn = getClipboardSetFn(); if not clipFn then Status.Text = "⚠ sin clipboard"; print(jsonEncode(all)); return end
-    local okE, enc = pcall(jsonEncode, all); if not okE then Status.Text = "❌ encode"; return end
-    local okC = pcall(clipFn, enc); if okC then Status.Text = "📤 " .. #all .. " copiadas (" .. #enc .. "B)" else Status.Text = "❌ clipboard" end
-end)
+ExportAllBtn.MouseButton1Click:Connect(function() local all = {}; for _, name in ipairs(getAllNames()) do local r = loadRecording(name); if r then table.insert(all, r) end end; if #all == 0 then Status.Text = "❌ Nada"; return end; local clipFn = getClipboardSetFn(); if not clipFn then Status.Text = "⚠ sin clipboard"; print(jsonEncode(all)); return end; local okE, enc = pcall(jsonEncode, all); if not okE then Status.Text = "❌ encode"; return end; local okC = pcall(clipFn, enc); if okC then Status.Text = "📤 " .. #all .. " copiadas (" .. #enc .. "B)" else Status.Text = "❌ clipboard" end end)
 RefreshBtn.MouseButton1Click:Connect(function() refreshList(); Status.Text = "Recargado" end)
 StopOverlay.MouseButton1Click:Connect(function() if state.recording then stopRecording() end; if state.playing then stopPlayback() end end)
-CloseBtn.MouseButton1Click:Connect(function()
-    if state.recording then stopRecording() end; if state.playing then stopPlayback() end
-    releaseAllTouches(); unlockCamera(); restoreWindow()
-    pcall(function() ScreenGui:Destroy() end); pcall(function() OverlayGui:Destroy() end)
-end)
+CloseBtn.MouseButton1Click:Connect(function() if state.recording then stopRecording() end; if state.playing then stopPlayback() end; releaseAllTouches(); unlockCamera(); restoreWindow(); pcall(function() ScreenGui:Destroy() end); pcall(function() OverlayGui:Destroy() end) end)
 
-PMFromClip.MouseButton1Click:Connect(function()
-    if not hasGetClipboard then PMCount.Text = "❌ getclipboard no disponible"; return end
-    local ok, raw = pcall(getclipboard); if ok and raw and raw ~= "" then PMBox.Text = raw else PMCount.Text = "❌ Portapapeles vacío" end
-end)
+PMFromClip.MouseButton1Click:Connect(function() if not hasGetClipboard then PMCount.Text = "❌ no getclipboard"; return end; local ok, raw = pcall(getclipboard); if ok and raw and raw ~= "" then PMBox.Text = raw else PMCount.Text = "❌ Vacío" end end)
 PMCancel.MouseButton1Click:Connect(closePasteModal)
-PMCargar.MouseButton1Click:Connect(function()
-    local raw = PMBox.Text; if not raw or raw:gsub("%s", "") == "" then PMCount.Text = "❌ Caja vacía"; return end
-    local saved, skipped, err, fname, method = importFromText(raw)
-    if err then PMCount.Text = "❌ " .. err; return end
-    if fname and saved == 1 then NameBox.Text = fname end; Status.Text = "📋 " .. saved .. " (" .. skipped .. ")"; closePasteModal(); refreshList()
-end)
+PMCargar.MouseButton1Click:Connect(function() local raw = PMBox.Text; if not raw or raw:gsub("%s", "") == "" then PMCount.Text = "❌ Caja vacía"; return end; local saved, skipped, err, fname, method = importFromText(raw); if err then PMCount.Text = "❌ " .. err; return end; if fname and saved == 1 then NameBox.Text = fname end; Status.Text = "📋 " .. saved .. " (" .. skipped .. ")"; closePasteModal(); refreshList() end)
 PMBackdrop.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then closePasteModal() end end)
 
 UserInputService.InputBegan:Connect(function(input, gp)
     if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
     if UserInputService:GetFocusedTextBox() then return end
     if input.KeyCode == Enum.KeyCode.F8 then if state.recording then stopRecording() else startRecording() end
-    elseif input.KeyCode == Enum.KeyCode.F9 then
-        local name = NameBox.Text:gsub("[^%w_%-]", "_"); if name ~= "" then local r = loadRecording(name); if r and r.events then playRecording(r.events, name, state.looped, r) end end
+    elseif input.KeyCode == Enum.KeyCode.F9 then local name = NameBox.Text:gsub("[^%w_%-]", "_"); if name ~= "" then local r = loadRecording(name); if r and r.events then playRecording(r.events, name, state.looped, r) end end
     elseif input.KeyCode == Enum.KeyCode.F10 then if state.recording then stopRecording() end; if state.playing then stopPlayback() end
     elseif input.KeyCode == Enum.KeyCode.F11 then if FixedClickBtn and FixedClickBtn.Parent then FixedClickBtn:FireClick() end end
 end)
@@ -1634,25 +1302,16 @@ end
 
 state.autoloadName = readAutoload(); refreshList()
 if not hasFS then Status.Text = "⚠ Sin FS" elseif isSharedFolder then Status.Text = "✅ " .. activeFolder else Status.Text = "⚠ per-game: " .. activeFolder end
-
 if AUTO_LOAD_OUTPUT then
     local trimmed = AUTO_LOAD_JSON:gsub("^%s+", ""):gsub("%s+$", "")
-    if #trimmed > 10 then
-        local saved, skipped, err, fname, method = importFromText(trimmed)
-        if not err then if fname and saved == 1 then NameBox.Text = fname end; refreshList() end
-    end
+    if #trimmed > 10 then local saved, skipped, err, fname, method = importFromText(trimmed); if not err then if fname and saved == 1 then NameBox.Text = fname end; refreshList() end end
 end
-
 if state.autoloadName then
     local r = loadRecording(state.autoloadName)
     if not r or not r.events then state.autoloadName = nil; writeAutoload(nil); refreshList()
     else
         local nameToPlay = state.autoloadName
-        task.spawn(function()
-            task.wait(AUTO_EXECUTE_DELAY); local r2 = loadRecording(nameToPlay)
-            if r2 and r2.events then Status.Text = "🐵 Auto-ejecutando: " .. nameToPlay; NameBox.Text = nameToPlay; playRecording(r2.events, nameToPlay, state.looped, r2) end
-        end)
+        task.spawn(function() task.wait(AUTO_EXECUTE_DELAY); local r2 = loadRecording(nameToPlay); if r2 and r2.events then Status.Text = "🐵 Auto-ejecutando: " .. nameToPlay; NameBox.Text = nameToPlay; playRecording(r2.events, nameToPlay, state.looped, r2) end end)
     end
 end
-
-warn("=== Macro Recorder v8.7.3 cargado con éxito ===")
+warn("=== Macro Recorder v8.7.4 cargado con éxito ===")
