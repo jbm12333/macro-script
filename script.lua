@@ -1,20 +1,14 @@
 --[[
 ================================================================================
-  MACRO RECORDER v8.7.2 — Fix error sintaxis línea 1069 + PlayerGui prioritario
+  MACRO RECORDER v8.7.3 — Estable (Sin límite de registros + Sintaxis limpia)
 ================================================================================
 ]]
 
-if type(queue_on_teleport) == "function" then
-    pcall(function()
-        queue_on_teleport('pcall(function() loadstring(game:HttpGet("https://raw.githubusercontent.com/jbm12333/macro-script/refs/heads/main/script.lua", true))() end)')
-    end)
-end
-
-local Players          = game:GetService("Players")
+local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
-local RunService       = game:GetService("RunService")
-local TweenService     = game:GetService("TweenService")
-local HttpService      = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
 
 local LocalPlayer = Players.LocalPlayer
@@ -31,9 +25,7 @@ pcall(function()
     end
 end)
 
-if not game:IsLoaded() then
-    game.Loaded:Wait()
-end
+if not game:IsLoaded() then game.Loaded:Wait() end
 do
     local deadline = os.clock() + 15
     while os.clock() < deadline do
@@ -46,9 +38,9 @@ end
 local AUTO_LOAD_OUTPUT     = true
 local AUTO_LOAD_JSON       = [[]]
 local AUTO_EXECUTE_DELAY   = 3.0
-local AUTO_CLICK_DELAY   = 2.0
-local AUTO_CLICK_TIMEOUT = 15.0
-local AUTO_CLICK_POLL    = 0.2
+local AUTO_CLICK_DELAY     = 2.0
+local AUTO_CLICK_TIMEOUT   = 15.0
+local AUTO_CLICK_POLL      = 0.2
 local REC_MOUSE_MIN_PIXELS = 3
 local REC_TOUCH_MIN_PIXELS = 4
 local REC_CAM_POS_THRESH   = 0.35
@@ -56,32 +48,28 @@ local REC_CAM_ROT_THRESH   = 0.03
 local REC_CAM_FOV_THRESH   = 0.5
 local REC_HRP_POS_THRESH   = 0.10
 local REC_HRP_ROT_THRESH   = 0.08
-local BASE_GUI_W = 400
-local BASE_GUI_H = 690
-local BAR_W      = 170
-local BAR_H      = 52
+local BASE_GUI_W           = 400
+local BASE_GUI_H           = 690
+local BAR_W                = 170
+local BAR_H                = 52
 local FIXED_CLICK_X        = 559
 local FIXED_CLICK_Y        = 511
 local FIXED_CLICK_COOLDOWN = 0.4
-local DEBUG_KEYS = true
-local FORCE_VIM  = false
+local DEBUG_KEYS           = true
+local FORCE_VIM            = false
 
-local TouchEnabled    = UserInputService.TouchEnabled
-local MouseEnabled    = UserInputService.MouseEnabled
-local KeyboardEnabled = UserInputService.KeyboardEnabled
-local isMobileMode    = TouchEnabled and not MouseEnabled
+local TouchEnabled      = UserInputService.TouchEnabled
+local MouseEnabled      = UserInputService.MouseEnabled
+local KeyboardEnabled   = UserInputService.KeyboardEnabled
+local isMobileMode      = TouchEnabled and not MouseEnabled
 local hasFireTouchInput = (type(firetouchinput) == "function")
 local hasVIMSendMouse   = (VirtualInputManager and VirtualInputManager.SendMouseButtonEvent) ~= nil
 local hasVIMSendMove    = (VirtualInputManager and VirtualInputManager.SendMouseMoveEvent) ~= nil
-
-local hasFS = (type(writefile) == "function")
-          and (type(readfile)  == "function")
-          and (type(isfile)    == "function")
-
-local hasSetClipboard = (type(setclipboard) == "function")
-                     or (type(toclipboard) == "function")
-                     or (type(writeclipboard) == "function")
-local hasGetClipboard = (type(getclipboard) == "function")
+local hasFS             = (type(writefile) == "function") and (type(readfile) == "function") and (type(isfile) == "function")
+local hasSetClipboard   = (type(setclipboard) == "function") or (type(toclipboard) == "function") or (type(writeclipboard) == "function")
+local hasGetClipboard   = (type(getclipboard) == "function")
+local hasFireSignal     = (type(firesignal) == "function")
+local hasGetConns       = (type(getconnections) == "function")
 
 local function getClipboardSetFn()
     if type(setclipboard) == "function" then return setclipboard, "setclipboard" end
@@ -89,9 +77,6 @@ local function getClipboardSetFn()
     if type(writeclipboard) == "function" then return writeclipboard, "writeclipboard" end
     return nil, nil
 end
-
-local hasFireSignal = (type(firesignal) == "function")
-local hasGetConns   = (type(getconnections) == "function")
 
 local PATH_CANDIDATES = {
     "/sdcard/MacroRecorder/", "/storage/emulated/0/MacroRecorder/",
@@ -116,8 +101,7 @@ if hasFS then
         end
     end
 end
-local isSharedFolder = activeFolder and (activeFolder:sub(1,1) == "/"
-    or activeFolder:match("^[A-Za-z]:/")) or false
+local isSharedFolder = activeFolder and (activeFolder:sub(1,1) == "/" or activeFolder:match("^[A-Za-z]:/")) or false
 
 local memRecordings = {}
 local MAX_SIZE = 64 * 1024 * 1024
@@ -196,8 +180,7 @@ local state = {
     recording = false, playing = false, looped = false,
     recordStart = 0, events = {}, activeKeys = {},
     currentSession = 0, playStart = nil, playLoopStart = nil,
-    autoClick = false, forceMouse = false,
-    moveEnabled = true,
+    autoClick = false, forceMouse = false, moveEnabled = true,
     startHrpCFrame = nil, startCamCFrame = nil, startCamFOV = nil,
     autoloadName = nil, camKeyframes = nil, hrpKeyframes = nil, hasHrpData = false,
     controlledHumanoid = nil, savedHumanoid = nil,
@@ -245,7 +228,7 @@ Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 8)
 
 local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -40, 1, 0); Title.Position = UDim2.new(0, 12, 0, 0)
-Title.BackgroundTransparency = 1; Title.Text = "● Macro Recorder v8.7.2"
+Title.BackgroundTransparency = 1; Title.Text = "● Macro Recorder v8.7.3"
 Title.TextColor3 = Color3.fromRGB(210, 210, 255)
 Title.Font = Enum.Font.GothamBold; Title.TextSize = 13
 Title.TextXAlignment = Enum.TextXAlignment.Left; Title.Parent = TitleBar
@@ -560,7 +543,7 @@ local function restoreWindow()
             d:SetAttribute("_MRVisSaved", nil)
         end
     end
-    Title.Text = "● Macro Recorder v8.7.2"; CloseBtn.Visible = true
+    Title.Text = "● Macro Recorder v8.7.3"; CloseBtn.Visible = true
 end
 
 local function updateGuiScale()
@@ -1672,4 +1655,4 @@ if state.autoloadName then
     end
 end
 
-warn("=== Macro Recorder v8.7.2 cargado con éxito ===")
+warn("=== Macro Recorder v8.7.3 cargado con éxito ===")
