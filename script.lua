@@ -1,13 +1,9 @@
 --[[
 ================================================================================
-  MACRO RECORDER v8.5.2 — Auto-click disparado por visibilidad de botón
+  MACRO RECORDER v8.5.3 — Auto-click disparado por visibilidad de botón
                               + Persistencia del watcher
                               + FIX: Out of local registers (límite 200)
-================================================================================
-  CAMBIOS v8.5.2:
-    • Refactorización de ámbitos locales (do...end) para evitar que el
-      script exceda el límite de 200 variables locales en el chunk principal.
-    • Se mantienen todas las funciones de v8.5.1.
+                              + NUEVO: Delay de 2s antes de hacer click
 ================================================================================
 ]]
 
@@ -91,9 +87,11 @@ local BASE_GUI_H = 690
 local BAR_W      = 170
 local BAR_H      = 52
 
+--============ AUTO-CLICK POR VISIBILIDAD DE BOTÓN ============
 local FIXED_CLICK_X        = 559
 local FIXED_CLICK_Y        = 511
 local FIXED_CLICK_COOLDOWN = 0.4
+local FIXED_CLICK_DELAY    = 2.0  -- ⏳ NUEVO: delay antes de clickear
 
 local DEBUG_KEYS = true
 local FORCE_VIM  = false
@@ -287,7 +285,7 @@ do
 
     Title = Instance.new("TextLabel")
     Title.Size = UDim2.new(1, -40, 1, 0); Title.Position = UDim2.new(0, 12, 0, 0)
-    Title.BackgroundTransparency = 1; Title.Text = "● Macro Recorder v8.5.2"
+    Title.BackgroundTransparency = 1; Title.Text = "● Macro Recorder v8.5.3"
     Title.TextColor3 = Color3.fromRGB(210, 210, 255)
     Title.Font = Enum.Font.GothamBold; Title.TextSize = 13
     Title.TextXAlignment = Enum.TextXAlignment.Left; Title.Parent = TitleBar
@@ -593,7 +591,7 @@ local function restoreWindow()
             d:SetAttribute("_MRVisSaved", nil)
         end
     end
-    Title.Text = "● Macro Recorder v8.5.2"
+    Title.Text = "● Macro Recorder v8.5.3"
     CloseBtn.Visible = true
 end
 
@@ -1509,7 +1507,10 @@ local function tryFixedClick()
 
     if visible and not fixedBtnWasVisible then
         fixedBtnWasVisible = true
-        task.wait(0.1)
+        -- ⏳ Esperar el delay configurado antes de hacer click (2s por defecto)
+        if FIXED_CLICK_DELAY and FIXED_CLICK_DELAY > 0 then
+            task.wait(FIXED_CLICK_DELAY)
+        end
         local ok = moveCursorAndClick()
         if ok then
             state.fixedClickLastAt = now
@@ -2610,14 +2611,14 @@ if state.autoloadName then
     end
 end
 
-print("=== Macro Recorder v8.5.2 ===")
+print("=== Macro Recorder v8.5.3 ===")
 print(string.format("[Plataforma] Touch=%s Mouse=%s Keyboard=%s | firetouchinput=%s VIM=%s",
     tostring(TouchEnabled), tostring(MouseEnabled), tostring(KeyboardEnabled),
     tostring(hasFireTouchInput), tostring(hasVIMSendMouse)))
 print(string.format("[Viewport inicial] %dx%d",
     currentViewport().X, currentViewport().Y))
-print(string.format("[Auto-click] vigilar botón del PathBox → cursor a (%d,%d) y click | cooldown %.2fs",
-    FIXED_CLICK_X, FIXED_CLICK_Y, FIXED_CLICK_COOLDOWN))
+print(string.format("[Auto-click] vigilar botón del PathBox → cursor a (%d,%d) y click | delay %.2fs | cooldown %.2fs",
+    FIXED_CLICK_X, FIXED_CLICK_Y, FIXED_CLICK_DELAY, FIXED_CLICK_COOLDOWN))
 print("F8=Grabar  F9=Reproducir  F10=Detener  F11=Vigilar botón ON/OFF")
 print("🐵 = auto-ejecutar  🍌 = quitar  |  🎯 = vigilar botón → click (559,511)")
 print("Carpeta activa: " .. tostring(activeFolder))
