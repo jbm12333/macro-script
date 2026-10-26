@@ -1,14 +1,14 @@
 --[[
 ================================================================================
-  MACRO RECORDER v8.5 — Auto-click disparado por visibilidad de botón
+  MACRO RECORDER v8.7 — GUI visible en móvil (PlayerGui prioritario)
 ================================================================================
-  CAMBIOS v8.5:
-    • El botón 🎯 ahora vigila un BOTÓN (por path) en vez de vigilar el cursor.
-    • Cuando ese botón pasa de invisible → visible, el script mueve el ratón
-      a (559, 511) y hace click AHÍ (coordenada fija, no sobre el botón).
-    • Cooldown de 0.4 s entre disparos para evitar dobles.
-    • Todo lo de v8.4 intacto (grabación, reproducción, escalado, cámara,
-      HRP, touch, 🐵/🍌, minimizar, queue_on_teleport).
+  CAMBIOS v8.7:
+    • getGuiParent() ahora prioriza PlayerGui (donde el juego pone SU HUD, que
+      siempre renderiza). gethui() y CoreGui quedan como fallback.
+    • ScreenGui.Parent se asigna con cadena de fallback y print diagnóstico.
+    • ScreenGui.Enabled = true explícito.
+    • Verificación a los 2s: imprime parent, AbsoluteSize, posición y escala.
+    • El resto es idéntico a v8.6.
 ================================================================================
 ]]
 
@@ -25,7 +25,7 @@ do
     if ok then
         print("[MacroRec] 📡 queue_on_teleport activo → " .. RAW_URL)
     else
-        print("[MacroRec] ⚠ queue_on_teleport no disponible. Usa autoexec para persistencia.")
+        print("[MacroRec] ⚠ queue_on_teleport no disponible.")
     end
 end
 
@@ -39,21 +39,19 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 local LocalPlayer = Players.LocalPlayer
 local unpack = table.unpack or unpack
 
---============ GUARD CONTRA DUPLICADOS ============
 pcall(function()
     local cg = game:GetService("CoreGui")
-    local old = cg:FindFirstChild("MacroRec_v8_5"); if old then old:Destroy() end
+    local old = cg:FindFirstChild("MacroRec_v8_7"); if old then old:Destroy() end
     local oldOv = cg:FindFirstChild("MacroRec_Overlay"); if oldOv then oldOv:Destroy() end
-    local pg = LocalPlayer:FindFirstChild("PlayerGui")
+    local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
     if pg then
-        local old2 = pg:FindFirstChild("MacroRec_v8_5"); if old2 then old2:Destroy() end
+        local old2 = pg:FindFirstChild("MacroRec_v8_7"); if old2 then old2:Destroy() end
         local old2ov = pg:FindFirstChild("MacroRec_Overlay"); if old2ov then old2ov:Destroy() end
     end
 end)
 
---============ ESPERA DE CARGA (para autoexec) ============
 if not game:IsLoaded() then
-    print("[MacroRec] Esperando a que el juego cargue…")
+    print("[MacroRec] Esperando carga…")
     game.Loaded:Wait()
 end
 do
@@ -63,22 +61,14 @@ do
         if char and char:FindFirstChild("HumanoidRootPart") then break end
         task.wait(0.1)
     end
-    local char = LocalPlayer.Character
-    if char and char:FindFirstChild("HumanoidRootPart") then
-        print("[MacroRec] ✅ Juego y personaje listos")
-    else
-        print("[MacroRec] ⚠ Personaje no cargó en 15s, continuando igualmente…")
-    end
 end
 
 local AUTO_LOAD_OUTPUT     = true
 local AUTO_LOAD_JSON       = [[]]
 local AUTO_EXECUTE_DELAY   = 3.0
-
 local AUTO_CLICK_DELAY   = 2.0
 local AUTO_CLICK_TIMEOUT = 15.0
 local AUTO_CLICK_POLL    = 0.2
-
 local REC_MOUSE_MIN_PIXELS = 3
 local REC_TOUCH_MIN_PIXELS = 4
 local REC_CAM_POS_THRESH   = 0.35
@@ -86,21 +76,16 @@ local REC_CAM_ROT_THRESH   = 0.03
 local REC_CAM_FOV_THRESH   = 0.5
 local REC_HRP_POS_THRESH   = 0.10
 local REC_HRP_ROT_THRESH   = 0.08
-
 local BASE_GUI_W = 400
 local BASE_GUI_H = 690
 local BAR_W      = 170
 local BAR_H      = 52
-
---============ AUTO-CLICK POR VISIBILIDAD DE BOTÓN ============
 local FIXED_CLICK_X        = 559
 local FIXED_CLICK_Y        = 511
 local FIXED_CLICK_COOLDOWN = 0.4
-
 local DEBUG_KEYS = true
 local FORCE_VIM  = false
 
---============ DETECCIÓN DE PLATAFORMA ============
 local TouchEnabled    = UserInputService.TouchEnabled
 local MouseEnabled    = UserInputService.MouseEnabled
 local KeyboardEnabled = UserInputService.KeyboardEnabled
@@ -165,57 +150,82 @@ local fn = {
     mousescroll = mousescroll,
 }
 
---==================================================================
---  TECLADO
---==================================================================
 local function doKeyPress(kc)
     if not FORCE_VIM and type(fn.keypress) == "function" then
         local ok = pcall(fn.keypress, kc)
-        if ok then
-            if DEBUG_KEYS then print("[Key] press (native):", kc.Name) end
-            return true
-        end
+        if ok then return true end
     end
-    local ok2 = pcall(function()
-        VirtualInputManager:SendKeyEvent(true, kc, false, game)
-    end)
-    if DEBUG_KEYS then print("[Key] press (VIM):", kc.Name, ok2 and "OK" or "FAIL") end
-    return ok2
+    return pcall(function() VirtualInputManager:SendKeyEvent(true, kc, false, game) end)
 end
 local function doKeyRelease(kc)
     if not FORCE_VIM and type(fn.keyrelease) == "function" then
         local ok = pcall(fn.keyrelease, kc)
-        if ok then
-            if DEBUG_KEYS then print("[Key] release (native):", kc.Name) end
-            return true
-        end
+        if ok then return true end
     end
-    local ok2 = pcall(function()
-        VirtualInputManager:SendKeyEvent(false, kc, false, game)
-    end)
-    if DEBUG_KEYS then print("[Key] release (VIM):", kc.Name, ok2 and "OK" or "FAIL") end
-    return ok2
+    return pcall(function() VirtualInputManager:SendKeyEvent(false, kc, false, game) end)
 end
 
---==================================================================
---  GUI
---==================================================================
+--============ GET GUI PARENT (PlayerGui prioritario) ============
 local function getGuiParent()
-    if gethui then local ok, h = pcall(gethui); if ok and h then return h end end
+    -- PlayerGui SIEMPRE primero: es donde el juego pone SU HUD → siempre renderiza
+    local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    if pg then
+        print("[MacroRec] 🖼️ Parent: PlayerGui")
+        return pg
+    end
+    -- gethui segunda opción
+    if gethui then
+        local ok, h = pcall(gethui)
+        if ok and h then
+            print("[MacroRec] 🖼️ Parent: gethui()")
+            return h
+        end
+    end
+    -- CoreGui como último recurso
     local ok, cg = pcall(function() return game:GetService("CoreGui") end)
-    if ok and cg then return cg end
+    if ok and cg then
+        print("[MacroRec] 🖼️ Parent: CoreGui")
+        return cg
+    end
+    print("[MacroRec] 🖼️ Parent: PlayerGui (WaitForChild)")
     return LocalPlayer:WaitForChild("PlayerGui")
 end
 local guiParent = getGuiParent()
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "MacroRec_v8_5"
+ScreenGui.Name = "MacroRec_v8_7"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.IgnoreGuiInset = true
 ScreenGui.DisplayOrder = 999999
+ScreenGui.Enabled = true
+
+-- Cadena de fallback para parent
+local parentOk = false
 pcall(function() ScreenGui.Parent = guiParent end)
-if not ScreenGui.Parent then ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+if ScreenGui.Parent then parentOk = true end
+if not parentOk then
+    local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    if pg then
+        pcall(function() ScreenGui.Parent = pg end)
+        if ScreenGui.Parent then parentOk = true end
+    end
+end
+if not parentOk and gethui then
+    local ok, h = pcall(gethui)
+    if ok and h then
+        pcall(function() ScreenGui.Parent = h end)
+        if ScreenGui.Parent then parentOk = true end
+    end
+end
+if not parentOk then
+    local ok, cg = pcall(function() return game:GetService("CoreGui") end)
+    if ok and cg then
+        pcall(function() ScreenGui.Parent = cg end)
+        if ScreenGui.Parent then parentOk = true end
+    end
+end
+print("[MacroRec] 🖼️ ScreenGui parent final: " .. (ScreenGui.Parent and ScreenGui.Parent:GetFullName() or "❌ NINGUNO"))
 
 local state = {
     recording = false, playing = false, looped = false,
@@ -223,34 +233,24 @@ local state = {
     currentSession = 0, playStart = nil, playLoopStart = nil,
     autoClick = false, forceMouse = false,
     moveEnabled = true,
-    startHrpCFrame = nil,
-    startCamCFrame = nil,
-    startCamFOV    = nil,
-    autoloadName   = nil,
-    camKeyframes    = nil,
-    hrpKeyframes    = nil,
-    hasHrpData      = false,
-    controlledHumanoid = nil,
-    savedHumanoid      = nil,
-    startViewport   = nil,
-    playViewport    = nil,
-    fixedClickActive  = false,
-    fixedClickLastAt  = 0,
-    fixedClickLastBtn = nil,
+    startHrpCFrame = nil, startCamCFrame = nil, startCamFOV = nil,
+    autoloadName = nil, camKeyframes = nil, hrpKeyframes = nil, hasHrpData = false,
+    controlledHumanoid = nil, savedHumanoid = nil,
+    startViewport = nil, playViewport = nil,
+    fixedClickActive = false, fixedClickLastAt = 0, fixedClickLastBtn = nil,
 }
 
---============ CAMERA LOCK (multi-capa) ============
-local camLocked          = false
-local originalCamType    = nil
+local camLocked = false
+local originalCamType = nil
 local originalCamSubject = nil
-local lastAppliedCamCF   = nil
-local lastAppliedCamFOV  = nil
-local PLAYBACK_BIND      = "MacroRecPlayback"
-local CAM_LOCK_BIND_HI   = "MacroRecCamLockHi"
-local CAM_LOCK_BIND_LO   = "MacroRecCamLockLo"
-local camLockConns       = {}
-local camDriftCount      = 0
-local camSetting         = false
+local lastAppliedCamCF = nil
+local lastAppliedCamFOV = nil
+local PLAYBACK_BIND = "MacroRecPlayback"
+local CAM_LOCK_BIND_HI = "MacroRecCamLockHi"
+local CAM_LOCK_BIND_LO = "MacroRecCamLockLo"
+local camLockConns = {}
+local camDriftCount = 0
+local camSetting = false
 
 local MacroInput = Instance.new("BindableEvent")
 MacroInput.Name = "MacroInput"; MacroInput.Parent = ScreenGui
@@ -260,7 +260,10 @@ Main.Name = "Main"
 Main.Size = UDim2.new(0, BASE_GUI_W, 0, BASE_GUI_H)
 Main.Position = UDim2.new(0, 20, 0, 40)
 Main.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
-Main.BorderSizePixel = 0; Main.Parent = ScreenGui
+Main.BorderSizePixel = 0
+Main.Visible = true
+Main.Active = true
+Main.Parent = ScreenGui
 Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 8)
 local MainStroke = Instance.new("UIStroke", Main)
 MainStroke.Color = Color3.fromRGB(70, 70, 100)
@@ -277,7 +280,7 @@ Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 8)
 
 local Title = Instance.new("TextLabel")
 Title.Size = UDim2.new(1, -40, 1, 0); Title.Position = UDim2.new(0, 12, 0, 0)
-Title.BackgroundTransparency = 1; Title.Text = "● Macro Recorder v8.5"
+Title.BackgroundTransparency = 1; Title.Text = "● Macro Recorder v8.7"
 Title.TextColor3 = Color3.fromRGB(210, 210, 255)
 Title.Font = Enum.Font.GothamBold; Title.TextSize = 13
 Title.TextXAlignment = Enum.TextXAlignment.Left; Title.Parent = TitleBar
@@ -289,23 +292,53 @@ CloseBtn.TextColor3 = Color3.new(1, 1, 1); CloseBtn.Font = Enum.Font.GothamBold
 CloseBtn.TextSize = 13; CloseBtn.BorderSizePixel = 0; CloseBtn.Parent = TitleBar
 Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 4)
 
-local dragging, dragStart, startPos = false, nil, nil
+--============ DRAG (PC + móvil) ============
+local dragging = false
+local dragStart = nil
+local startPos = nil
+local dragTouchInput = nil
+
+local function updateDragPosition(newPos)
+    if not dragging or not dragStart or not startPos then return end
+    local delta = newPos - dragStart
+    Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
+                              startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+end
+local function endDrag()
+    dragging = false; dragTouchInput = nil; dragStart = nil; startPos = nil
+end
+
 TitleBar.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1
        or input.UserInputType == Enum.UserInputType.Touch then
         dragging = true; dragStart = input.Position; startPos = Main.Position
+        dragTouchInput = (input.UserInputType == Enum.UserInputType.Touch) and input or nil
         input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            if input.UserInputState == Enum.UserInputState.End then endDrag() end
         end)
     end
 end)
 UserInputService.InputChanged:Connect(function(input)
-    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-       or input.UserInputType == Enum.UserInputType.Touch) then
-        local d = input.Position - dragStart
-        Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X,
-                                  startPos.Y.Scale, startPos.Y.Offset + d.Y)
+    if not dragging then return end
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+        updateDragPosition(input.Position)
     end
+end)
+pcall(function()
+    UserInputService.TouchMoved:Connect(function(touch, gp)
+        if not dragging then return end
+        if dragTouchInput and touch == dragTouchInput then
+            updateDragPosition(touch.Position)
+        end
+    end)
+end)
+pcall(function()
+    UserInputService.TouchEnded:Connect(function(touch, gp)
+        if dragging and dragTouchInput and touch == dragTouchInput then endDrag() end
+    end)
+end)
+RunService.RenderStepped:Connect(function()
+    if dragging and dragTouchInput then updateDragPosition(dragTouchInput.Position) end
 end)
 
 local Chrono = Instance.new("TextLabel")
@@ -401,10 +434,8 @@ FixedClickBtn.Position = UDim2.new(0, 10, 0, fixedY)
 FixedClickBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
 FixedClickBtn.Text = "🎯 Vigilar botón → click en (" .. FIXED_CLICK_X .. "," .. FIXED_CLICK_Y .. "): OFF"
 FixedClickBtn.TextColor3 = Color3.new(1, 1, 1)
-FixedClickBtn.Font = Enum.Font.GothamBold
-FixedClickBtn.TextSize = 11
-FixedClickBtn.BorderSizePixel = 0
-FixedClickBtn.Parent = Main
+FixedClickBtn.Font = Enum.Font.GothamBold; FixedClickBtn.TextSize = 11
+FixedClickBtn.BorderSizePixel = 0; FixedClickBtn.Parent = Main
 Instance.new("UICorner", FixedClickBtn).CornerRadius = UDim.new(0, 4)
 
 local ListHeader = Instance.new("Frame")
@@ -465,35 +496,30 @@ PlatformBadge.BackgroundTransparency = 1; PlatformBadge.Font = Enum.Font.GothamB
 PlatformBadge.TextSize = 10; PlatformBadge.TextXAlignment = Enum.TextXAlignment.Right
 PlatformBadge.Parent = Main
 if isMobileMode then
-    PlatformBadge.Text = "📱 Móvil"
-    PlatformBadge.TextColor3 = Color3.fromRGB(100, 220, 150)
+    PlatformBadge.Text = "📱 Móvil"; PlatformBadge.TextColor3 = Color3.fromRGB(100, 220, 150)
 elseif TouchEnabled then
-    PlatformBadge.Text = "🖥️📱 Mixto"
-    PlatformBadge.TextColor3 = Color3.fromRGB(220, 200, 100)
+    PlatformBadge.Text = "🖥️📱 Mixto"; PlatformBadge.TextColor3 = Color3.fromRGB(220, 200, 100)
 else
-    PlatformBadge.Text = "🖥️ PC"
-    PlatformBadge.TextColor3 = Color3.fromRGB(150, 160, 240)
+    PlatformBadge.Text = "🖥️ PC"; PlatformBadge.TextColor3 = Color3.fromRGB(150, 160, 240)
 end
 
 local OverlayGui = Instance.new("ScreenGui")
 OverlayGui.Name = "MacroRec_Overlay"; OverlayGui.ResetOnSpawn = false
 OverlayGui.IgnoreGuiInset = true; OverlayGui.DisplayOrder = 1000000
 pcall(function() OverlayGui.Parent = guiParent end)
-if not OverlayGui.Parent then OverlayGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+if not OverlayGui.Parent then
+    pcall(function() OverlayGui.Parent = LocalPlayer:FindFirstChildOfClass("PlayerGui") end)
+end
 
 local FixedMarker = Instance.new("Frame")
 FixedMarker.Size = UDim2.new(0, 16, 0, 16)
 FixedMarker.Position = UDim2.new(0, FIXED_CLICK_X - 8, 0, FIXED_CLICK_Y - 8)
 FixedMarker.BackgroundColor3 = Color3.fromRGB(255, 200, 50)
-FixedMarker.BackgroundTransparency = 0.35
-FixedMarker.BorderSizePixel = 0
-FixedMarker.ZIndex = 1000000
-FixedMarker.Visible = false
-FixedMarker.Parent = OverlayGui
+FixedMarker.BackgroundTransparency = 0.35; FixedMarker.BorderSizePixel = 0
+FixedMarker.ZIndex = 1000000; FixedMarker.Visible = false; FixedMarker.Parent = OverlayGui
 Instance.new("UICorner", FixedMarker).CornerRadius = UDim.new(1, 0)
 local fixedMarkerStroke = Instance.new("UIStroke", FixedMarker)
-fixedMarkerStroke.Color = Color3.fromRGB(255, 200, 50)
-fixedMarkerStroke.Thickness = 2
+fixedMarkerStroke.Color = Color3.fromRGB(255, 200, 50); fixedMarkerStroke.Thickness = 2
 
 local Cursor = Instance.new("Frame")
 Cursor.Size = UDim2.new(0, 14, 0, 14); Cursor.BackgroundColor3 = Color3.fromRGB(0, 255, 150)
@@ -534,31 +560,22 @@ end
 local function setFakeCursor(x, y) Cursor.Position = UDim2.new(0, x - 7, 0, y - 7) end
 
 local function drawCrosshair(x, y, color, lifetime)
-    color = color or Color3.fromRGB(255, 50, 50)
-    lifetime = lifetime or 1.5
+    color = color or Color3.fromRGB(255, 50, 50); lifetime = lifetime or 1.5
     local h = Instance.new("Frame")
     h.Size = UDim2.new(0, 30, 0, 2); h.Position = UDim2.new(0, x - 15, 0, y - 1)
-    h.BackgroundColor3 = color; h.BorderSizePixel = 0; h.ZIndex = 1000002
-    h.Parent = OverlayGui
+    h.BackgroundColor3 = color; h.BorderSizePixel = 0; h.ZIndex = 1000002; h.Parent = OverlayGui
     local v = Instance.new("Frame")
     v.Size = UDim2.new(0, 2, 0, 30); v.Position = UDim2.new(0, x - 1, 0, y - 15)
-    v.BackgroundColor3 = color; v.BorderSizePixel = 0; v.ZIndex = 1000002
-    v.Parent = OverlayGui
+    v.BackgroundColor3 = color; v.BorderSizePixel = 0; v.ZIndex = 1000002; v.Parent = OverlayGui
     local o = Instance.new("Frame")
     o.Size = UDim2.new(0, 18, 0, 18); o.Position = UDim2.new(0, x - 9, 0, y - 9)
-    o.BackgroundTransparency = 1; o.ZIndex = 1000002
-    o.Parent = OverlayGui
+    o.BackgroundTransparency = 1; o.ZIndex = 1000002; o.Parent = OverlayGui
     Instance.new("UICorner", o).CornerRadius = UDim.new(1, 0)
     local os_ = Instance.new("UIStroke", o)
     os_.Color = color; os_.Thickness = 2
-    task.delay(lifetime, function()
-        h:Destroy(); v:Destroy(); o:Destroy()
-    end)
+    task.delay(lifetime, function() h:Destroy(); v:Destroy(); o:Destroy() end)
 end
 
---==================================================================
---  VIEWPORT + ESCALADO
---==================================================================
 local function currentViewport()
     local cam = workspace.CurrentCamera
     if cam then return cam.ViewportSize end
@@ -573,23 +590,15 @@ local function scalePoint(x, y)
     return x * (newVP.X / oldVP.X), y * (newVP.Y / oldVP.Y)
 end
 
---==================================================================
---  MINIMIZAR VENTANA AL REPRODUCIR
---==================================================================
 local savedWindow = nil
 
 local function minimizeToRight()
     if savedWindow then return end
-    savedWindow = {
-        size  = Main.Size,
-        pos   = Main.Position,
-        scale = MainScale.Scale,
-    }
+    savedWindow = { size = Main.Size, pos = Main.Position, scale = MainScale.Scale }
     MainScale.Scale = 1
     local vp = currentViewport()
     Main.Size = UDim2.new(0, BAR_W, 0, BAR_H)
     Main.Position = UDim2.new(1, -(BAR_W + 8), 0, math.floor((vp.Y - BAR_H) / 2))
-
     for _, d in ipairs(Main:GetDescendants()) do
         if (d:IsA("GuiObject") or d:IsA("GuiButton")) and d ~= Main
            and d ~= TitleBar and d ~= Title and d ~= CloseBtn then
@@ -607,11 +616,8 @@ end
 
 local function restoreWindow()
     if not savedWindow then return end
-    Main.Size = savedWindow.size
-    Main.Position = savedWindow.pos
-    MainScale.Scale = savedWindow.scale
+    Main.Size = savedWindow.size; Main.Position = savedWindow.pos; MainScale.Scale = savedWindow.scale
     savedWindow = nil
-
     for _, d in ipairs(Main:GetDescendants()) do
         local saved = d:GetAttribute("_MRVisSaved")
         if saved ~= nil and (d:IsA("GuiObject") or d:IsA("GuiButton")) then
@@ -619,13 +625,10 @@ local function restoreWindow()
             d:SetAttribute("_MRVisSaved", nil)
         end
     end
-    Title.Text = "● Macro Recorder v8.5"
+    Title.Text = "● Macro Recorder v8.7"
     CloseBtn.Visible = true
 end
 
---==================================================================
---  GUI RESPONSIVE
---==================================================================
 local function updateGuiScale()
     if savedWindow then return end
     local vp = currentViewport()
@@ -633,38 +636,27 @@ local function updateGuiScale()
     local sy = (vp.Y - 20) / BASE_GUI_H
     local newScale = math.min(sx, sy, 1)
     newScale = math.max(newScale, 0.4)
-
     if math.abs(newScale - MainScale.Scale) > 0.02 then
         MainScale.Scale = newScale
     end
-
     local scaledW = math.floor(BASE_GUI_W * newScale)
     local scaledH = math.floor(BASE_GUI_H * newScale)
     local posX = Main.Position.X.Offset
     local posY = Main.Position.Y.Offset
-    if posX + scaledW > vp.X then
-        posX = math.max(10, vp.X - scaledW - 10)
-    end
-    if posY + scaledH > vp.Y then
-        posY = math.max(10, vp.Y - scaledH - 10)
-    end
+    if posX + scaledW > vp.X then posX = math.max(10, vp.X - scaledW - 10) end
+    if posY + scaledH > vp.Y then posY = math.max(10, vp.Y - scaledH - 10) end
     if posX ~= Main.Position.X.Offset or posY ~= Main.Position.Y.Offset then
         Main.Position = UDim2.new(0, posX, 0, posY)
     end
 end
 
---==================================================================
---  MODAL
---==================================================================
 local PMBackdrop = Instance.new("Frame")
 PMBackdrop.Size = UDim2.new(1, 0, 1, 0); PMBackdrop.BackgroundColor3 = Color3.new(0, 0, 0)
 PMBackdrop.BackgroundTransparency = 0.5; PMBackdrop.BorderSizePixel = 0
-PMBackdrop.Visible = false; PMBackdrop.ZIndex = 49; PMBackdrop.Active = true
-PMBackdrop.Parent = ScreenGui
+PMBackdrop.Visible = false; PMBackdrop.ZIndex = 49; PMBackdrop.Active = true; PMBackdrop.Parent = ScreenGui
 
 local PasteModal = Instance.new("Frame")
-PasteModal.Size = UDim2.new(0, 540, 0, 470)
-PasteModal.Position = UDim2.new(0.5, -270, 0.5, -235)
+PasteModal.Size = UDim2.new(0, 540, 0, 470); PasteModal.Position = UDim2.new(0.5, -270, 0.5, -235)
 PasteModal.BackgroundColor3 = Color3.fromRGB(28, 28, 36); PasteModal.BorderSizePixel = 0
 PasteModal.Visible = false; PasteModal.ZIndex = 50; PasteModal.Parent = ScreenGui
 Instance.new("UICorner", PasteModal).CornerRadius = UDim.new(0, 8)
@@ -680,8 +672,7 @@ PMTitle.ZIndex = 51; PMTitle.Parent = PasteModal
 
 local PMHelp = Instance.new("TextLabel")
 PMHelp.Size = UDim2.new(1, -20, 0, 18); PMHelp.Position = UDim2.new(0, 10, 0, 34)
-PMHelp.BackgroundTransparency = 1
-PMHelp.Text = "Pega el JSON. Para archivos grandes usa 📂 en la lista."
+PMHelp.BackgroundTransparency = 1; PMHelp.Text = "Pega el JSON. Para archivos grandes usa 📂."
 PMHelp.TextColor3 = Color3.fromRGB(140, 140, 170); PMHelp.Font = Enum.Font.Gotham
 PMHelp.TextSize = 11; PMHelp.TextXAlignment = Enum.TextXAlignment.Left
 PMHelp.ZIndex = 51; PMHelp.Parent = PasteModal
@@ -694,10 +685,8 @@ PMBox.TextColor3 = Color3.fromRGB(200, 200, 220)
 PMBox.PlaceholderColor3 = Color3.fromRGB(90, 90, 110)
 PMBox.Font = Enum.Font.Code; PMBox.TextSize = 11
 PMBox.MultiLine = true; PMBox.TextWrapped = true
-PMBox.TextXAlignment = Enum.TextXAlignment.Left
-PMBox.TextYAlignment = Enum.TextYAlignment.Top
-PMBox.ClearTextOnFocus = false
-PMBox.ZIndex = 51; PMBox.Parent = PasteModal
+PMBox.TextXAlignment = Enum.TextXAlignment.Left; PMBox.TextYAlignment = Enum.TextYAlignment.Top
+PMBox.ClearTextOnFocus = false; PMBox.ZIndex = 51; PMBox.Parent = PasteModal
 Instance.new("UICorner", PMBox).CornerRadius = UDim.new(0, 4)
 
 local PMCount = Instance.new("TextLabel")
@@ -743,9 +732,6 @@ local function closePasteModal()
     PMBackdrop.Visible = false; PasteModal.Visible = false
 end
 
---==================================================================
---  JSON PARSER
---==================================================================
 local function jsonEncode(t) return HttpService:JSONEncode(t) end
 local function jsonDecode(s) return HttpService:JSONDecode(s) end
 
@@ -769,11 +755,9 @@ local function tryUnescape(raw)
     return raw
 end
 local function tryExtractJson(raw)
-    local s1 = raw:find("{")
-    local s2 = raw:find("%[")
+    local s1 = raw:find("{"); local s2 = raw:find("%[")
     local startIdx = nil
-    if s1 and s2 then startIdx = math.min(s1, s2)
-    else startIdx = s1 or s2 end
+    if s1 and s2 then startIdx = math.min(s1, s2) else startIdx = s1 or s2 end
     if not startIdx then return nil end
     local lastIdx = nil
     for i = #raw, startIdx, -1 do
@@ -789,27 +773,18 @@ local function robustJsonDecode(raw)
     if not raw then return nil, "clean nil" end
     raw = raw:gsub("^%s+", ""):gsub("%s+$", "")
     if raw == "" then return nil, "vacío" end
-
     local ok, res = pcall(jsonDecode, raw)
     if ok and type(res) == "table" then return res, nil, "directo" end
-
     local un = tryUnescape(raw)
     if un ~= raw then
         local ok2, res2 = pcall(jsonDecode, un)
         if ok2 and type(res2) == "table" then return res2, nil, "un-escape" end
     end
-
     local ext = tryExtractJson(un)
     if ext and ext ~= un then
         local ok3, res3 = pcall(jsonDecode, ext)
         if ok3 and type(res3) == "table" then return res3, nil, "extraído" end
-        local extU = tryUnescape(ext)
-        if extU ~= ext then
-            local ok4, res4 = pcall(jsonDecode, extU)
-            if ok4 and type(res4) == "table" then return res4, nil, "extraído+unesc" end
-        end
     end
-
     if type(loadstring) == "function" then
         local cand = ext or un or raw
         local ok5, fn2 = pcall(loadstring, "return " .. cand)
@@ -818,22 +793,12 @@ local function robustJsonDecode(raw)
             if ok6 and type(res5) == "table" then return res5, nil, "lua" end
         end
     end
-
-    local ok7, res7 = pcall(jsonDecode, raw)
-    if ok7 and type(res7) == "string" then
-        local ok8, res8 = pcall(jsonDecode, res7)
-        if ok8 and type(res8) == "table" then return res8, nil, "doble" end
-    end
-
     local preview = raw:sub(1, 80)
     if #raw > 80 then preview = preview .. "…" end
     preview = preview:gsub("\n", "\\n"):gsub("\r", "\\r"):gsub("\t", "\\t")
     return nil, "JSON inválido | " .. #raw .. "B | inicio: [" .. preview .. "]"
 end
 
---==================================================================
---  ARCHIVOS
---==================================================================
 local function folderPath(name) return activeFolder and (activeFolder .. name .. ".json") or nil end
 local function indexPath() return activeFolder and (activeFolder .. "index.json") or nil end
 local function autoloadPath() return activeFolder and (activeFolder .. "autoload.json") or nil end
@@ -851,7 +816,6 @@ local function writeIndex(names)
     local p = indexPath(); if not p then return end
     local ok, enc = pcall(jsonEncode, names); if ok then pcall(writefile, p, enc) end
 end
-
 local function readAutoload()
     if not activeFolder then return nil end
     local p = autoloadPath()
@@ -870,26 +834,20 @@ local function writeAutoload(name)
 end
 
 local function saveRecording(name, events, duration, created, extra)
-    local payload = { name = name, events = events,
-        created = created or os.time(), duration = duration or 0 }
-    if extra then
-        for k, v in pairs(extra) do payload[k] = v end
-    end
+    local payload = { name = name, events = events, created = created or os.time(), duration = duration or 0 }
+    if extra then for k, v in pairs(extra) do payload[k] = v end end
     local ok, encoded = pcall(jsonEncode, payload)
     if not ok then return false, "JSONEncode falló" end
-    if #encoded > MAX_SIZE then return false, "Excede " .. math.floor(MAX_SIZE/1048576) .. "MB" end
+    if #encoded > MAX_SIZE then return false, "Excede MB" end
     if activeFolder then
         local p = folderPath(name)
         local okW = pcall(writefile, p, encoded)
         if okW and isfile(p) then
-            local okR, back = pcall(readfile, p)
-            if okR and back and #back > 10 then
-                local names = readIndex()
-                local found = false
-                for _, n in ipairs(names) do if n == name then found = true break end end
-                if not found then table.insert(names, name); writeIndex(names) end
-                return true, "disco: " .. activeFolder
-            end
+            local names = readIndex()
+            local found = false
+            for _, n in ipairs(names) do if n == name then found = true break end end
+            if not found then table.insert(names, name); writeIndex(names) end
+            return true, "disco"
         end
     end
     memRecordings[name] = payload
@@ -946,48 +904,30 @@ local function fmtDate(ts)
     local ok, d = pcall(os.date, "%Y-%m-%d %H:%M", ts); return ok and d or ""
 end
 
---==================================================================
---  IMPORT
---==================================================================
 local function importFromText(raw)
-    if not raw or raw:gsub("%s", "") == "" then
-        return 0, 0, "Texto vacío", nil, nil
-    end
+    if not raw or raw:gsub("%s", "") == "" then return 0, 0, "Texto vacío", nil, nil end
     local dec, err, method = robustJsonDecode(raw)
     if not dec then return 0, 0, err or "JSON inválido", nil, nil end
-
     local saved, skipped = 0, 0
     local firstName = nil
     local function trySave(rec)
-        if type(rec) ~= "table" or not rec.name or not rec.events then
-            skipped = skipped + 1; return
-        end
+        if type(rec) ~= "table" or not rec.name or not rec.events then skipped = skipped + 1; return end
         local n = tostring(rec.name):gsub("[^%w_%-]", "_")
         local extra = {}
         if rec.startHrpCFrame then extra.startHrpCFrame = rec.startHrpCFrame end
         if rec.startCamCFrame then extra.startCamCFrame = rec.startCamCFrame end
-        if rec.startCamFOV    then extra.startCamFOV    = rec.startCamFOV    end
-        if rec.startViewport  then extra.startViewport  = rec.startViewport  end
+        if rec.startCamFOV then extra.startCamFOV = rec.startCamFOV end
+        if rec.startViewport then extra.startViewport = rec.startViewport end
         local okS = saveRecording(n, rec.events, rec.duration or 0, rec.created, extra)
-        if okS then
-            saved = saved + 1
-            if not firstName then firstName = n end
+        if okS then saved = saved + 1; if not firstName then firstName = n end
         else skipped = skipped + 1 end
     end
-
-    if dec.name and dec.events then
-        trySave(dec)
-    elseif #dec > 0 then
-        for _, r in ipairs(dec) do trySave(r) end
-    else
-        return 0, 0, "JSON sin grabaciones", nil, method
-    end
+    if dec.name and dec.events then trySave(dec)
+    elseif #dec > 0 then for _, r in ipairs(dec) do trySave(r) end
+    else return 0, 0, "JSON sin grabaciones", nil, method end
     return saved, skipped, nil, firstName, method
 end
 
---==================================================================
---  HELPERS
---==================================================================
 local function cframesDiffer(a, b, posT, rotT)
     if not a or not b then return true end
     if (a.Position - b.Position).Magnitude > posT then return true end
@@ -997,16 +937,11 @@ local function cframesDiffer(a, b, posT, rotT)
 end
 local function getMainBounds()
     if savedWindow then
-        local x = Main.Position.X.Offset
-        local y = Main.Position.Y.Offset
-        return x, y, BAR_W, BAR_H
+        return Main.Position.X.Offset, Main.Position.Y.Offset, BAR_W, BAR_H
     end
     local scale = (MainScale and MainScale.Scale) or 1
-    local x = Main.Position.X.Offset
-    local y = Main.Position.Y.Offset
-    local w = math.floor(BASE_GUI_W * scale)
-    local h = math.floor(BASE_GUI_H * scale)
-    return x, y, w, h
+    return Main.Position.X.Offset, Main.Position.Y.Offset,
+        math.floor(BASE_GUI_W * scale), math.floor(BASE_GUI_H * scale)
 end
 local function isOverGui()
     if not Main.Visible then return false end
@@ -1037,16 +972,11 @@ local function findBracket(kfs, t)
     return a, b, alpha
 end
 
---==================================================================
---  CAMERA LOCK (multi-capa)
---==================================================================
 local function enforceCamLock()
     if not camLocked then return end
     local cam = workspace.CurrentCamera
     if not cam then return end
-
     camSetting = true
-
     if cam.CameraType ~= Enum.CameraType.Scriptable then
         pcall(function() cam.CameraType = Enum.CameraType.Scriptable end)
     end
@@ -1055,10 +985,7 @@ local function enforceCamLock()
         if drift > 0.01 then camDriftCount = camDriftCount + 1 end
         pcall(function() cam.CFrame = lastAppliedCamCF end)
     end
-    if lastAppliedCamFOV then
-        pcall(function() cam.FieldOfView = lastAppliedCamFOV end)
-    end
-
+    if lastAppliedCamFOV then pcall(function() cam.FieldOfView = lastAppliedCamFOV end) end
     camSetting = false
 end
 
@@ -1066,23 +993,13 @@ local function lockCamera()
     if camLocked then return end
     local cam = workspace.CurrentCamera
     if not cam then return end
-
-    originalCamType    = cam.CameraType
-    originalCamSubject = cam.CameraSubject
-    camLocked          = true
-    camDriftCount      = 0
-
+    originalCamType = cam.CameraType; originalCamSubject = cam.CameraSubject
+    camLocked = true; camDriftCount = 0
     pcall(function() cam.CameraType = Enum.CameraType.Scriptable end)
-
-    pcall(function()
-        RunService:BindToRenderStep(CAM_LOCK_BIND_HI, 10000, enforceCamLock)
-    end)
-    pcall(function()
-        RunService:BindToRenderStep(CAM_LOCK_BIND_LO, Enum.RenderPriority.Camera.Value + 2, enforceCamLock)
-    end)
+    pcall(function() RunService:BindToRenderStep(CAM_LOCK_BIND_HI, 10000, enforceCamLock) end)
+    pcall(function() RunService:BindToRenderStep(CAM_LOCK_BIND_LO, Enum.RenderPriority.Camera.Value + 2, enforceCamLock) end)
     table.insert(camLockConns, RunService.Heartbeat:Connect(enforceCamLock))
     table.insert(camLockConns, RunService.Stepped:Connect(enforceCamLock))
-
     table.insert(camLockConns, cam:GetPropertyChangedSignal("CameraType"):Connect(function()
         if camLocked and cam.CameraType ~= Enum.CameraType.Scriptable then
             pcall(function() cam.CameraType = Enum.CameraType.Scriptable end)
@@ -1093,69 +1010,43 @@ local function lockCamera()
         if (cam.CFrame.Position - lastAppliedCamCF.Position).Magnitude < 0.001 then return end
         enforceCamLock()
     end))
-
-    print("[MacroRec] 🔒 Cámara bloqueada (RenderStep+Heartbeat+Stepped+Watchdogs)")
 end
 
 local function unlockCamera()
     if not camLocked then return end
     camLocked = false
-
     pcall(function() RunService:UnbindFromRenderStep(CAM_LOCK_BIND_HI) end)
     pcall(function() RunService:UnbindFromRenderStep(CAM_LOCK_BIND_LO) end)
-    for _, c in ipairs(camLockConns) do
-        pcall(function() c:Disconnect() end)
-    end
+    for _, c in ipairs(camLockConns) do pcall(function() c:Disconnect() end) end
     camLockConns = {}
-
     local cam = workspace.CurrentCamera
     if cam then
-        if originalCamType then
-            pcall(function() cam.CameraType = originalCamType end)
-        end
-        if originalCamSubject then
-            pcall(function() cam.CameraSubject = originalCamSubject end)
-        end
+        if originalCamType then pcall(function() cam.CameraType = originalCamType end) end
+        if originalCamSubject then pcall(function() cam.CameraSubject = originalCamSubject end) end
     end
-
-    if camDriftCount > 0 then
-        print(string.format("[MacroRec] 🔓 Cámara desbloqueada (%d correcciones)", camDriftCount))
-    end
-
-    lastAppliedCamCF   = nil
-    lastAppliedCamFOV  = nil
-    originalCamType    = nil
-    originalCamSubject = nil
-    camDriftCount      = 0
+    lastAppliedCamCF = nil; lastAppliedCamFOV = nil
+    originalCamType = nil; originalCamSubject = nil; camDriftCount = 0
 end
 
---==================================================================
---  TELETRANSPORTE
---==================================================================
 local function teleportToStart(rec)
-    if not rec or not rec.startHrpCFrame then
-        return false, "sin posición guardada"
-    end
+    if not rec or not rec.startHrpCFrame then return false, "sin posición" end
     local deadline = os.clock() + 5
     local char = LocalPlayer.Character
     while os.clock() < deadline do
         if char and char:FindFirstChild("HumanoidRootPart") then break end
-        task.wait(0.1)
-        char = LocalPlayer.Character
+        task.wait(0.1); char = LocalPlayer.Character
     end
     if not char then return false, "sin character" end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return false, "sin HRP" end
     local targetCF = CFrame.new(unpack(rec.startHrpCFrame))
-    if char.PivotTo then
-        pcall(function() char:PivotTo(targetCF) end)
-    end
+    if char.PivotTo then pcall(function() char:PivotTo(targetCF) end) end
     task.wait(0.05)
     if (hrp.Position - targetCF.Position).Magnitude > 2 then
         pcall(function() hrp.CFrame = targetCF end)
     end
     pcall(function()
-        hrp.AssemblyLinearVelocity  = Vector3.new(0, 0, 0)
+        hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
         hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
     end)
     task.wait(0.3)
@@ -1174,24 +1065,14 @@ local function teleportToStart(rec)
             end)
         end
     end
-    local dist = (hrp.Position - targetCF.Position).Magnitude
-    if dist > 5 then
-        print(string.format("[MacroRec] ⚠ Teleport dudoso (Δ=%.1f)", dist))
-    else
-        print(string.format("[MacroRec] 📍 Teleport OK (Δ=%.1f)", dist))
-    end
-    return true, string.format("📍 restaurado (Δ=%.1f)", dist)
+    return true, string.format("📍 Δ=%.1f", (hrp.Position - targetCF.Position).Magnitude)
 end
 
---==================================================================
---  PLAYBACK RENDERSTEP
---==================================================================
 local function playbackRenderStep()
     if not state.playing then return end
     local now = os.clock()
     local base = state.playLoopStart or state.playStart or now
     local elapsed = now - base
-
     local camKFs = state.camKeyframes
     if camKFs and #camKFs > 0 then
         local a, b, alpha = findBracket(camKFs, elapsed)
@@ -1206,16 +1087,13 @@ local function playbackRenderStep()
                 cam.CFrame = cf
                 local fovA, fovB = a.fov, b.fov
                 if fovA or fovB then
-                    fovA = fovA or fovB
-                    fovB = fovB or fovA
+                    fovA = fovA or fovB; fovB = fovB or fovA
                     local fov = fovA + (fovB - fovA) * alpha
-                    lastAppliedCamFOV = fov
-                    cam.FieldOfView = fov
+                    lastAppliedCamFOV = fov; cam.FieldOfView = fov
                 end
             end
         end
     end
-
     if state.hasHrpData and state.moveEnabled then
         local hrpKFs = state.hrpKeyframes
         if hrpKFs and #hrpKFs > 0 then
@@ -1227,7 +1105,7 @@ local function playbackRenderStep()
                     local cf = a.cf:Lerp(b.cf, alpha)
                     pcall(function()
                         hrp.CFrame = cf
-                        hrp.AssemblyLinearVelocity  = Vector3.new(0, 0, 0)
+                        hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
                         hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
                     end)
                 end
@@ -1236,33 +1114,23 @@ local function playbackRenderStep()
     end
 end
 
---==================================================================
---  CALIBRACIÓN
---==================================================================
 local function mousemoveToRoblox(targetX, targetY, maxIter)
     maxIter = maxIter or 6
     if not fn.mousemoveabs then return false, "no mousemoveabs", 0 end
     local guessX, guessY = targetX, targetY
     local lastErr = math.huge
     for i = 1, maxIter do
-        pcall(fn.mousemoveabs, guessX, guessY)
-        task.wait(0.03)
+        pcall(fn.mousemoveabs, guessX, guessY); task.wait(0.03)
         local actual = UserInputService:GetMouseLocation()
-        local dx = targetX - actual.X
-        local dy = targetY - actual.Y
+        local dx = targetX - actual.X; local dy = targetY - actual.Y
         local err = math.sqrt(dx*dx + dy*dy)
         if err < 3 then return true, "OK", i end
         if err >= lastErr then return false, "no converge", i end
-        lastErr = err
-        guessX = guessX + dx
-        guessY = guessY + dy
+        lastErr = err; guessX = guessX + dx; guessY = guessY + dy
     end
     return false, "max iter", maxIter
 end
 
---==================================================================
---  AUTO-CLICK POR PATH (PlayAgain u otro)
---==================================================================
 local function resolveGuiPath(relPath)
     local pg = LocalPlayer:FindFirstChildOfClass("PlayerGui")
     if not pg then return nil, "PlayerGui no existe" end
@@ -1299,26 +1167,22 @@ local function inspectPath()
     if path == "" then Status.Text = "⚠ Path vacío"; return end
     local btn, err = resolveGuiPath(path)
     if not btn then Status.Text = "❌ " .. tostring(err); return end
-    Status.Text = string.format("🔍 %s @ %.0f,%.0f", btn.ClassName,
-        btn.AbsolutePosition.X, btn.AbsolutePosition.Y)
+    Status.Text = string.format("🔍 %s @ %.0f,%.0f", btn.ClassName, btn.AbsolutePosition.X, btn.AbsolutePosition.Y)
 end
 local function forceMouseClickCalibrated(btn)
     if not btn or not btn:IsA("GuiButton") then return false, "no GuiButton" end
     if not btn.Visible then return false, "invisible" end
     local ap, as = btn.AbsolutePosition, btn.AbsoluteSize
     if as.X < 1 or as.Y < 1 then return false, "tamaño=0" end
-    local cx = ap.X + as.X / 2
-    local cy = ap.Y + as.Y / 2
+    local cx, cy = ap.X + as.X / 2, ap.Y + as.Y / 2
     drawCrosshair(cx, cy, Color3.fromRGB(255, 50, 50), 2)
     mousemoveToRoblox(cx, cy)
     local finalPos = UserInputService:GetMouseLocation()
-    local onTarget = finalPos.X >= ap.X and finalPos.X <= ap.X + as.X
-                 and finalPos.Y >= ap.Y and finalPos.Y <= ap.Y + as.Y
-    if not onTarget then return false, "cursor no calibró" end
-    task.wait(0.05)
-    if type(fn.mouse1click) == "function" then
-        pcall(fn.mouse1click); task.wait(0.08)
+    if not (finalPos.X >= ap.X and finalPos.X <= ap.X + as.X and finalPos.Y >= ap.Y and finalPos.Y <= ap.Y + as.Y) then
+        return false, "cursor no calibró"
     end
+    task.wait(0.05)
+    if type(fn.mouse1click) == "function" then pcall(fn.mouse1click); task.wait(0.08) end
     if type(fn.mouse1press) == "function" and type(fn.mouse1release) == "function" then
         pcall(fn.mouse1press); task.wait(0.05); pcall(fn.mouse1release)
     end
@@ -1339,12 +1203,9 @@ local function mobileClickButton(btn)
     end
     local ap, as = btn.AbsolutePosition, btn.AbsoluteSize
     if as.X < 1 or as.Y < 1 then return false, "tamaño=0" end
-    local cx = ap.X + as.X / 2
-    local cy = ap.Y + as.Y / 2
+    local cx, cy = ap.X + as.X / 2, ap.Y + as.Y / 2
     if hasFireTouchInput then
-        pcall(firetouchinput, cx, cy, 0)
-        task.wait(0.05)
-        pcall(firetouchinput, cx, cy, 1)
+        pcall(firetouchinput, cx, cy, 0); task.wait(0.05); pcall(firetouchinput, cx, cy, 1)
         return true, "firetouchinput"
     elseif hasVIMSendMouse then
         pcall(function()
@@ -1364,14 +1225,11 @@ local function markPath()
     local cx = btn.AbsolutePosition.X + btn.AbsoluteSize.X / 2
     local cy = btn.AbsolutePosition.Y + btn.AbsoluteSize.Y / 2
     drawCrosshair(cx, cy, Color3.fromRGB(50, 200, 255), 3)
-    local f = UserInputService:GetMouseLocation()
-    Status.Text = string.format("📍 %.0f,%.0f → %.0f,%.0f", f.X, f.Y, cx, cy)
+    Status.Text = string.format("📍 %.0f,%.0f → %.0f,%.0f", cx, cy, cx, cy)
 end
 local function tryClickButton(btn)
     if not btn or not btn:IsA("GuiButton") then return false, "no GuiButton" end
-    if not MouseEnabled then
-        return mobileClickButton(btn)
-    end
+    if not MouseEnabled then return mobileClickButton(btn) end
     if state.forceMouse then return forceMouseClickCalibrated(btn) end
     local active = getActiveSignals(btn)
     if #active > 0 and hasFireSignal then
@@ -1401,20 +1259,14 @@ local function clickPlayAgain()
     else Status.Text = "❌ " .. tostring(method); return false end
 end
 
---==================================================================
---  AUTO-CLICK POR VISIBILIDAD DE BOTÓN
---==================================================================
 local fixedBtnWasVisible = false
-
 local function resolveFixedBtn()
     local path = (PathBox.Text or ""):gsub("^%s+", ""):gsub("%s+$", "")
     if path == "" then return nil end
     return resolveGuiPath(path)
 end
-
 local function isBtnFullyVisible(btn)
-    if not btn then return false end
-    if not btn.Visible then return false end
+    if not btn or not btn.Visible then return false end
     local p = btn.Parent
     while p and p ~= game do
         if p:IsA("GuiObject") and not p.Visible then return false end
@@ -1423,22 +1275,15 @@ local function isBtnFullyVisible(btn)
     end
     return true
 end
-
 local function moveCursorAndClick()
-    if fn.mousemoveabs then
-        pcall(fn.mousemoveabs, FIXED_CLICK_X, FIXED_CLICK_Y)
-        task.wait(0.03)
-    end
+    if fn.mousemoveabs then pcall(fn.mousemoveabs, FIXED_CLICK_X, FIXED_CLICK_Y); task.wait(0.03) end
     local clicked = false
     if type(fn.mouse1click) == "function" then
         local ok = pcall(fn.mouse1click)
         if ok then clicked = true end
     end
     if type(fn.mouse1press) == "function" and type(fn.mouse1release) == "function" then
-        pcall(fn.mouse1press)
-        task.wait(0.05)
-        pcall(fn.mouse1release)
-        clicked = true
+        pcall(fn.mouse1press); task.wait(0.05); pcall(fn.mouse1release); clicked = true
     end
     if not clicked and hasVIMSendMouse then
         pcall(function()
@@ -1457,15 +1302,12 @@ local function moveCursorAndClick()
     clickCircle(FIXED_CLICK_X, FIXED_CLICK_Y, Color3.fromRGB(255, 200, 50))
     return clicked
 end
-
 local function tryFixedClick()
     if not state.fixedClickActive then return end
     local now = os.clock()
     if now - state.fixedClickLastAt < FIXED_CLICK_COOLDOWN then return end
-
     local btn = resolveFixedBtn()
     local visible = isBtnFullyVisible(btn)
-
     if visible and not fixedBtnWasVisible then
         fixedBtnWasVisible = true
         task.wait(0.1)
@@ -1473,24 +1315,17 @@ local function tryFixedClick()
         if ok then
             state.fixedClickLastAt = now
             state.fixedClickLastBtn = btn
-            Status.Text = string.format("🎯 Botón visible → click en (%d,%d)",
-                FIXED_CLICK_X, FIXED_CLICK_Y)
+            Status.Text = string.format("🎯 Click en (%d,%d)", FIXED_CLICK_X, FIXED_CLICK_Y)
         else
-            Status.Text = "⚠ Botón visible pero no se pudo clickear"
+            Status.Text = "⚠ Botón visible pero no clickeó"
         end
         return
     end
-    if not visible and fixedBtnWasVisible then
-        fixedBtnWasVisible = false
-    end
+    if not visible and fixedBtnWasVisible then fixedBtnWasVisible = false end
 end
 
---==================================================================
---  CAPTURA / HOOK
---==================================================================
 local captureMode = false
 local captureConns = {}
-
 local function hookForCapture(d)
     if not d:IsA("GuiButton") then return end
     if d:IsDescendantOf(ScreenGui) or d:IsDescendantOf(OverlayGui) then return end
@@ -1500,9 +1335,7 @@ local function hookForCapture(d)
         if captureMode then
             captureMode = false
             local full = d:GetFullName()
-            local relPath = full
-                :gsub("^Players%.LocalPlayer%.PlayerGui%.", "")
-                :gsub("^PlayerGui%.", ""):gsub("^CoreGui%.", "")
+            local relPath = full:gsub("^Players%.LocalPlayer%.PlayerGui%.", ""):gsub("^PlayerGui%.", ""):gsub("^CoreGui%.", "")
             PathBox.Text = relPath
             Status.Text = "🎯 Path: " .. relPath
             for _, c in ipairs(captureConns) do pcall(function() c:Disconnect() end) end
@@ -1543,22 +1376,15 @@ task.spawn(function()
 end)
 if pgRef then pgRef.DescendantAdded:Connect(function(d) hookButton(d) end) end
 
---==================================================================
---  GRABACIÓN
---==================================================================
 local lastMousePos, lastCamCFrame, lastCamFOV = Vector2.new(-100,-100), nil, nil
 local lastHrpCFrame = nil
-
 local touchMap = {}
 local nextTouchId = 0
 local lastTouchPositions = {}
 
 local function resetTouchRecording()
-    touchMap = {}
-    nextTouchId = 0
-    lastTouchPositions = {}
+    touchMap = {}; nextTouchId = 0; lastTouchPositions = {}
 end
-
 local function pushEvent(ev)
     if not state.recording then return end
     ev.t = os.clock() - state.recordStart
@@ -1569,26 +1395,14 @@ local function startRecording()
     if state.playing then return end
     state.events = {}; state.recordStart = os.clock(); state.recording = true
     lastMousePos, lastCamCFrame, lastCamFOV = Vector2.new(-100,-100), nil, nil
-    lastHrpCFrame = nil
-    resetTouchRecording()
-
+    lastHrpCFrame = nil; resetTouchRecording()
     local char = LocalPlayer.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     state.startHrpCFrame = hrp and hrp.CFrame or nil
     local cam = workspace.CurrentCamera
     state.startCamCFrame = cam and cam.CFrame or nil
-    state.startCamFOV    = cam and cam.FieldOfView or nil
-    state.startViewport  = currentViewport()
-
-    if state.startHrpCFrame then
-        local p = state.startHrpCFrame.Position
-        print(string.format("[MacroRec] Pos inicial: (%.1f, %.1f, %.1f)", p.X, p.Y, p.Z))
-    else
-        print("[MacroRec] ⚠ No pude capturar HRP inicial")
-    end
-    print(string.format("[MacroRec] Viewport grabado: %dx%d",
-        state.startViewport.X, state.startViewport.Y))
-
+    state.startCamFOV = cam and cam.FieldOfView or nil
+    state.startViewport = currentViewport()
     RecDot.Visible = true; BtnRecord.Text = "■ Parar"
     BtnRecord.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
     Status.Text = "Grabando…"
@@ -1600,70 +1414,28 @@ local function stopRecording()
     RecDot.Visible = false
     BtnRecord.Text = "● Grabar"
     BtnRecord.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
-
-    if #state.events < 2 then
-        Status.Text = "Grabación vacía."
-        return
-    end
-
+    if #state.events < 2 then Status.Text = "Grabación vacía."; return end
     local name = NameBox.Text:gsub("[^%w_%-]", "_")
-    if name == "" then
-        name = "Rec_" .. os.date("%H%M%S")
-        NameBox.Text = name
-    end
+    if name == "" then name = "Rec_" .. os.date("%H%M%S"); NameBox.Text = name end
     local duration = state.events[#state.events].t or 0
-
     local extra = {}
-    if state.startHrpCFrame then
-        extra.startHrpCFrame = { state.startHrpCFrame:GetComponents() }
-    end
-    if state.startCamCFrame then
-        extra.startCamCFrame = { state.startCamCFrame:GetComponents() }
-    end
-    if state.startCamFOV then
-        extra.startCamFOV = state.startCamFOV
-    end
-    if state.startViewport then
-        extra.startViewport = { state.startViewport.X, state.startViewport.Y }
-    end
-
+    if state.startHrpCFrame then extra.startHrpCFrame = { state.startHrpCFrame:GetComponents() } end
+    if state.startCamCFrame then extra.startCamCFrame = { state.startCamCFrame:GetComponents() } end
+    if state.startCamFOV then extra.startCamFOV = state.startCamFOV end
+    if state.startViewport then extra.startViewport = { state.startViewport.X, state.startViewport.Y } end
     local okSave, msgSave = saveRecording(name, state.events, duration, nil, extra)
-    print("[MacroRec] save:", okSave and "OK" or "FAIL", "-", tostring(msgSave))
-
-    local counts = { cam = 0, hrp = 0, touch = 0, key = 0, mouse = 0 }
-    for _, ev in ipairs(state.events) do
-        local t = ev.type
-        if t == "cam" then counts.cam = counts.cam + 1
-        elseif t == "hrp" then counts.hrp = counts.hrp + 1
-        elseif t == "touchdown" or t == "touchmove" or t == "touchup"
-            or t == "tap" or t == "pan" or t == "longpress" then
-            counts.touch = counts.touch + 1
-        elseif t == "keydown" or t == "keyup" then counts.key = counts.key + 1
-        elseif t == "mouse" or t == "m1down" or t == "m1up"
-            or t == "m2down" or t == "m2up" or t == "wheel" then
-            counts.mouse = counts.mouse + 1
-        end
-    end
-    print(string.format("[MacroRec] %d ev | cam=%d hrp=%d touch=%d key=%d mouse=%d",
-        #state.events, counts.cam, counts.hrp, counts.touch, counts.key, counts.mouse))
-
-    local payload = { name = name, events = state.events,
-        created = os.time(), duration = duration }
+    local payload = { name = name, events = state.events, created = os.time(), duration = duration }
     for k, v in pairs(extra) do payload[k] = v end
     local okE, enc = pcall(jsonEncode, payload)
-
     local clipMsg = ""
-    if not okE or not enc then
-        clipMsg = " ❌ encode"
+    if not okE or not enc then clipMsg = " ❌ encode"
     else
-        local clipFn, clipName = getClipboardSetFn()
+        local clipFn = getClipboardSetFn()
         if clipFn then
             local okC = pcall(clipFn, enc)
-            if okC then clipMsg = " 📤 " .. #enc .. "B"
-            else clipMsg = " ❌ " .. clipName end
-        else clipMsg = " ⚠ sin clipboard" end
+            if okC then clipMsg = " 📤 " .. #enc .. "B" else clipMsg = " ❌ clipboard" end
+        end
     end
-
     Status.Text = (okSave and "✅ " or "⚠ ") .. name .. clipMsg
     pcall(refreshList)
 end
@@ -1693,43 +1465,36 @@ UserInputService.InputChanged:Connect(function(input)
     end
 end)
 
--- ====== GRABACIÓN TÁCTIL ======
 if TouchEnabled then
     UserInputService.InputBegan:Connect(function(input, gp)
         if input.UserInputType ~= Enum.UserInputType.Touch then return end
         if not state.recording then return end
         if isPointOverMainGui(input.Position.X, input.Position.Y) then return end
         if touchMap[input] then return end
-
         nextTouchId = nextTouchId + 1
         local id = nextTouchId
         touchMap[input] = { id = id, x = input.Position.X, y = input.Position.Y }
         lastTouchPositions[id] = Vector2.new(input.Position.X, input.Position.Y)
         pushEvent({ type = "touchdown", x = input.Position.X, y = input.Position.Y, id = id })
     end)
-
     UserInputService.InputChanged:Connect(function(input, gp)
         if input.UserInputType ~= Enum.UserInputType.Touch then return end
         if not state.recording then return end
         local info = touchMap[input]
         if not info then return end
         if isPointOverMainGui(input.Position.X, input.Position.Y) then return end
-
         local newPos = Vector2.new(input.Position.X, input.Position.Y)
         local last = lastTouchPositions[info.id]
         if last and (newPos - last).Magnitude < REC_TOUCH_MIN_PIXELS then return end
         lastTouchPositions[info.id] = newPos
-
         info.x, info.y = newPos.X, newPos.Y
         pushEvent({ type = "touchmove", x = newPos.X, y = newPos.Y, id = info.id })
     end)
-
     UserInputService.InputEnded:Connect(function(input, gp)
         if input.UserInputType ~= Enum.UserInputType.Touch then return end
         if not state.recording then return end
         local info = touchMap[input]
         if not info then return end
-
         touchMap[input] = nil
         lastTouchPositions[info.id] = nil
         pushEvent({ type = "touchup", x = input.Position.X, y = input.Position.Y, id = info.id })
@@ -1747,22 +1512,19 @@ RunService.RenderStepped:Connect(function()
         end
         local cam = workspace.CurrentCamera
         if cam then
-            local cfChanged  = cframesDiffer(lastCamCFrame, cam.CFrame, REC_CAM_POS_THRESH, REC_CAM_ROT_THRESH)
+            local cfChanged = cframesDiffer(lastCamCFrame, cam.CFrame, REC_CAM_POS_THRESH, REC_CAM_ROT_THRESH)
             local fovChanged = lastCamFOV == nil or math.abs(lastCamFOV - cam.FieldOfView) > REC_CAM_FOV_THRESH
             if cfChanged or fovChanged then
                 pushEvent({ type = "cam", cframe = { cam.CFrame:GetComponents() }, fov = cam.FieldOfView })
-                lastCamCFrame = cam.CFrame
-                lastCamFOV    = cam.FieldOfView
+                lastCamCFrame = cam.CFrame; lastCamFOV = cam.FieldOfView
             end
         end
         if state.moveEnabled then
             local char = LocalPlayer.Character
             local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                if cframesDiffer(lastHrpCFrame, hrp.CFrame, REC_HRP_POS_THRESH, REC_HRP_ROT_THRESH) then
-                    pushEvent({ type = "hrp", cframe = { hrp.CFrame:GetComponents() } })
-                    lastHrpCFrame = hrp.CFrame
-                end
+            if hrp and cframesDiffer(lastHrpCFrame, hrp.CFrame, REC_HRP_POS_THRESH, REC_HRP_ROT_THRESH) then
+                pushEvent({ type = "hrp", cframe = { hrp.CFrame:GetComponents() } })
+                lastHrpCFrame = hrp.CFrame
             end
         end
     elseif state.playing then
@@ -1773,9 +1535,6 @@ RunService.RenderStepped:Connect(function()
     pcall(tryFixedClick)
 end)
 
---==================================================================
---  REPRODUCCIÓN
---==================================================================
 local function waitUntil(targetT)
     while true do
         local now = os.clock()
@@ -1813,7 +1572,6 @@ local function prepareCamKeyframes(events, rec)
     end
     return kfs
 end
-
 local function prepareHrpKeyframes(events, rec)
     local kfs = {}
     local count = 0
@@ -1830,64 +1588,37 @@ local function prepareHrpKeyframes(events, rec)
 end
 
 local activeTouchIds = {}
-
 local function fireTouchDown(x, y, fingerId)
     fingerId = fingerId or 1
     if activeTouchIds[fingerId] then return end
     activeTouchIds[fingerId] = { x = x, y = y }
-    if hasVIMSendMouse then
-        pcall(function()
-            VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, fingerId)
-        end)
-    end
-    if hasFireTouchInput then
-        pcall(firetouchinput, x, y, 0)
-    end
+    if hasVIMSendMouse then pcall(function() VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, fingerId) end) end
+    if hasFireTouchInput then pcall(firetouchinput, x, y, 0) end
 end
-
 local function fireTouchMove(x, y, fingerId)
     fingerId = fingerId or 1
     local active = activeTouchIds[fingerId]
     if not active then return end
     active.x, active.y = x, y
-    if hasVIMSendMove then
-        pcall(function()
-            VirtualInputManager:SendMouseMoveEvent(x, y, game)
-        end)
-    end
-    if hasFireTouchInput then
-        pcall(firetouchinput, x, y, 2)
-    end
+    if hasVIMSendMove then pcall(function() VirtualInputManager:SendMouseMoveEvent(x, y, game) end) end
+    if hasFireTouchInput then pcall(firetouchinput, x, y, 2) end
 end
-
 local function fireTouchUp(x, y, fingerId)
     fingerId = fingerId or 1
     if not activeTouchIds[fingerId] then return end
     activeTouchIds[fingerId] = nil
-    if hasVIMSendMouse then
-        pcall(function()
-            VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, fingerId)
-        end)
-    end
-    if hasFireTouchInput then
-        pcall(firetouchinput, x, y, 1)
-    end
+    if hasVIMSendMouse then pcall(function() VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, fingerId) end) end
+    if hasFireTouchInput then pcall(firetouchinput, x, y, 1) end
 end
-
 local function releaseAllTouches()
     for fingerId, pos in pairs(activeTouchIds) do
         if hasVIMSendMouse then
-            pcall(function()
-                VirtualInputManager:SendMouseButtonEvent(pos.x, pos.y, 0, false, game, fingerId)
-            end)
+            pcall(function() VirtualInputManager:SendMouseButtonEvent(pos.x, pos.y, 0, false, game, fingerId) end)
         end
-        if hasFireTouchInput then
-            pcall(firetouchinput, pos.x, pos.y, 1)
-        end
+        if hasFireTouchInput then pcall(firetouchinput, pos.x, pos.y, 1) end
     end
     activeTouchIds = {}
 end
-
 local function fireLegacyTap(x, y)
     if hasVIMSendMouse then
         pcall(function()
@@ -1896,60 +1627,40 @@ local function fireLegacyTap(x, y)
             VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 1)
         end)
     elseif hasFireTouchInput then
-        pcall(firetouchinput, x, y, 0)
-        task.wait(0.03)
-        pcall(firetouchinput, x, y, 1)
+        pcall(firetouchinput, x, y, 0); task.wait(0.03); pcall(firetouchinput, x, y, 1)
     end
 end
 local function fireLegacyLongPress(x, y)
     if hasVIMSendMouse then
-        pcall(function()
-            VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 1)
-        end)
+        pcall(function() VirtualInputManager:SendMouseButtonEvent(x, y, 0, true, game, 1) end)
         task.wait(0.5)
-        pcall(function()
-            VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 1)
-        end)
+        pcall(function() VirtualInputManager:SendMouseButtonEvent(x, y, 0, false, game, 1) end)
     elseif hasFireTouchInput then
-        pcall(firetouchinput, x, y, 0)
-        task.wait(0.5)
-        pcall(firetouchinput, x, y, 1)
+        pcall(firetouchinput, x, y, 0); task.wait(0.5); pcall(firetouchinput, x, y, 1)
     end
 end
 local function fireLegacyPan(x, y)
-    if hasFireTouchInput then
-        pcall(firetouchinput, x, y, 2)
-    elseif hasVIMSendMove then
-        pcall(function()
-            VirtualInputManager:SendMouseMoveEvent(x, y, game)
-        end)
-    end
+    if hasFireTouchInput then pcall(firetouchinput, x, y, 2)
+    elseif hasVIMSendMove then pcall(function() VirtualInputManager:SendMouseMoveEvent(x, y, game) end) end
 end
 
 local function applyEvent(ev)
     local t = ev.type
     if t == "keydown" then
-        local kc = Enum.KeyCode[ev.key]
-        if kc then doKeyPress(kc) end
+        local kc = Enum.KeyCode[ev.key]; if kc then doKeyPress(kc) end
         state.activeKeys[ev.key] = true
     elseif t == "keyup" then
-        local kc = Enum.KeyCode[ev.key]
-        if kc then doKeyRelease(kc) end
+        local kc = Enum.KeyCode[ev.key]; if kc then doKeyRelease(kc) end
         state.activeKeys[ev.key] = nil
     elseif t == "m1down" then
         if fn.mouse1press then pcall(fn.mouse1press) end
-        local cx, cy = Cursor.AbsolutePosition.X + 7, Cursor.AbsolutePosition.Y + 7
-        clickCircle(cx, cy, Color3.fromRGB(255, 90, 90))
-    elseif t == "m1up" then
-        if fn.mouse1release then pcall(fn.mouse1release) end
+        clickCircle(Cursor.AbsolutePosition.X + 7, Cursor.AbsolutePosition.Y + 7, Color3.fromRGB(255, 90, 90))
+    elseif t == "m1up" then if fn.mouse1release then pcall(fn.mouse1release) end
     elseif t == "m2down" then
         if fn.mouse2press then pcall(fn.mouse2press) end
-        local cx, cy = Cursor.AbsolutePosition.X + 7, Cursor.AbsolutePosition.Y + 7
-        clickCircle(cx, cy, Color3.fromRGB(90, 150, 255))
-    elseif t == "m2up" then
-        if fn.mouse2release then pcall(fn.mouse2release) end
-    elseif t == "wheel" then
-        if fn.mousescroll then pcall(fn.mousescroll, ev.delta) end
+        clickCircle(Cursor.AbsolutePosition.X + 7, Cursor.AbsolutePosition.Y + 7, Color3.fromRGB(90, 150, 255))
+    elseif t == "m2up" then if fn.mouse2release then pcall(fn.mouse2release) end
+    elseif t == "wheel" then if fn.mousescroll then pcall(fn.mousescroll, ev.delta) end
     elseif t == "mouse" then
         local sx, sy = scalePoint(ev.x, ev.y)
         setFakeCursor(sx, sy)
@@ -1959,53 +1670,39 @@ local function applyEvent(ev)
         fireTouchDown(sx, sy, ev.id)
         clickCircle(sx, sy, Color3.fromRGB(255, 200, 50))
     elseif t == "touchmove" then
-        local sx, sy = scalePoint(ev.x, ev.y)
-        fireTouchMove(sx, sy, ev.id)
+        local sx, sy = scalePoint(ev.x, ev.y); fireTouchMove(sx, sy, ev.id)
     elseif t == "touchup" then
-        local sx, sy = scalePoint(ev.x, ev.y)
-        fireTouchUp(sx, sy, ev.id)
+        local sx, sy = scalePoint(ev.x, ev.y); fireTouchUp(sx, sy, ev.id)
     elseif t == "tap" then
-        local sx, sy = scalePoint(ev.x, ev.y)
-        fireLegacyTap(sx, sy)
-        clickCircle(sx, sy, Color3.fromRGB(255, 200, 50))
+        local sx, sy = scalePoint(ev.x, ev.y); fireLegacyTap(sx, sy)
     elseif t == "pan" then
-        local sx, sy = scalePoint(ev.x, ev.y)
-        fireLegacyPan(sx, sy)
+        local sx, sy = scalePoint(ev.x, ev.y); fireLegacyPan(sx, sy)
     elseif t == "longpress" then
-        local sx, sy = scalePoint(ev.x, ev.y)
-        fireLegacyLongPress(sx, sy)
-        clickCircle(sx, sy, Color3.fromRGB(200, 100, 255))
+        local sx, sy = scalePoint(ev.x, ev.y); fireLegacyLongPress(sx, sy)
     end
     refreshKeysLabel()
     pcall(function() MacroInput:Fire(ev) end)
 end
 
 local function restoreHumanoid()
-    local h = state.controlledHumanoid
-    local s = state.savedHumanoid
+    local h = state.controlledHumanoid; local s = state.savedHumanoid
     if h and s and h.Parent then
         pcall(function()
-            h.WalkSpeed = s.WalkSpeed
-            h.JumpPower = s.JumpPower
-            h.AutoRotate = s.AutoRotate
+            h.WalkSpeed = s.WalkSpeed; h.JumpPower = s.JumpPower; h.AutoRotate = s.AutoRotate
         end)
     end
-    state.controlledHumanoid = nil
-    state.savedHumanoid = nil
+    state.controlledHumanoid = nil; state.savedHumanoid = nil
 end
 
 local function stopPlayback()
     if not state.playing then return end
     pcall(function() RunService:UnbindFromRenderStep(PLAYBACK_BIND) end)
-    releaseAllTouches()
-    restoreHumanoid()
-    unlockCamera()
+    releaseAllTouches(); restoreHumanoid(); unlockCamera()
     state.playing = false; state.currentSession = state.currentSession + 1
     state.camKeyframes = nil; state.hrpKeyframes = nil; state.hasHrpData = false
     state.playViewport = nil
     Cursor.Visible = false; KeysLabel.Visible = false; StopOverlay.Visible = false
-    restoreWindow()
-    setMainInteractive(true)
+    restoreWindow(); setMainInteractive(true)
     for k in pairs(state.activeKeys) do
         local kc = Enum.KeyCode[k]; if kc then doKeyRelease(kc) end
     end
@@ -2017,60 +1714,34 @@ local function playRecording(events, name, looped, rec)
     if state.recording then stopRecording() end
     if state.playing then stopPlayback() end
     if not events or #events == 0 then Status.Text = "Grabación vacía."; return end
-
     local focused = UserInputService:GetFocusedTextBox()
-    if focused and focused.ReleaseFocus then
-        pcall(function() focused:ReleaseFocus() end)
-    end
-
+    if focused and focused.ReleaseFocus then pcall(function() focused:ReleaseFocus() end) end
     if rec and rec.startViewport and #rec.startViewport == 2 then
         state.playViewport = { X = rec.startViewport[1], Y = rec.startViewport[2] }
-        local cur = currentViewport()
-        print(string.format("[MacroRec] 🔍 Escalando %dx%d → %dx%d (sx=%.2f sy=%.2f)",
-            state.playViewport.X, state.playViewport.Y, cur.X, cur.Y,
-            cur.X / state.playViewport.X, cur.Y / state.playViewport.Y))
     else
-        local cur = currentViewport()
-        state.playViewport = { X = cur.X, Y = cur.Y }
-        print("[MacroRec] ℹ️ Macro sin viewport guardado → sin escalar")
+        local cur = currentViewport(); state.playViewport = { X = cur.X, Y = cur.Y }
     end
-
     lockCamera()
-
     if rec and rec.startHrpCFrame then
-        Status.Text = "📍 Restaurando posición…"
         local ok, msg = teleportToStart(rec)
-        if ok then Status.Text = msg else Status.Text = "⚠ " .. msg end
-        task.wait(0.2)
     end
-
     state.camKeyframes = prepareCamKeyframes(events, rec)
     local hrpKFs, hrpCount = prepareHrpKeyframes(events, rec)
-    state.hrpKeyframes = hrpKFs
-    state.hasHrpData = (hrpCount > 0)
+    state.hrpKeyframes = hrpKFs; state.hasHrpData = (hrpCount > 0)
     activeTouchIds = {}
-
     if state.hasHrpData and state.moveEnabled then
         local char = LocalPlayer.Character
         local humanoid = char and char:FindFirstChildOfClass("Humanoid")
         if humanoid then
             state.controlledHumanoid = humanoid
             state.savedHumanoid = {
-                WalkSpeed = humanoid.WalkSpeed,
-                JumpPower = humanoid.JumpPower,
-                AutoRotate = humanoid.AutoRotate,
+                WalkSpeed = humanoid.WalkSpeed, JumpPower = humanoid.JumpPower, AutoRotate = humanoid.AutoRotate,
             }
             pcall(function()
-                humanoid.WalkSpeed  = 0
-                humanoid.JumpPower  = 0
-                humanoid.AutoRotate = false
+                humanoid.WalkSpeed = 0; humanoid.JumpPower = 0; humanoid.AutoRotate = false
             end)
         end
-        print(string.format("[MacroRec] Movimiento ON (%d keyframes HRP)", hrpCount))
-    else
-        print("[MacroRec] Movimiento OFF")
     end
-
     do
         local cam = workspace.CurrentCamera
         if cam and #state.camKeyframes > 0 then
@@ -2086,34 +1757,21 @@ local function playRecording(events, name, looped, rec)
             end)
         end
     end
-
     state.playing = true; state.currentSession = state.currentSession + 1
     state.playStart = os.clock(); state.playLoopStart = state.playStart
     local session = state.currentSession
-
-    pcall(function()
-        RunService:BindToRenderStep(PLAYBACK_BIND, Enum.RenderPriority.Camera.Value + 1, playbackRenderStep)
-    end)
-
-    setMainInteractive(false)
-    minimizeToRight()
+    pcall(function() RunService:BindToRenderStep(PLAYBACK_BIND, Enum.RenderPriority.Camera.Value + 1, playbackRenderStep) end)
+    setMainInteractive(false); minimizeToRight()
     Cursor.Visible = true; KeysLabel.Visible = true; StopOverlay.Visible = true
-    if not (rec and rec.startHrpCFrame) then
-        Status.Text = "Reproduciendo: " .. tostring(name)
-    end
-
     task.spawn(function()
         while state.playing and session == state.currentSession do
-            local startT = os.clock()
-            state.playLoopStart = startT
+            local startT = os.clock(); state.playLoopStart = startT
             for i = 1, #events do
                 if not state.playing or session ~= state.currentSession then return end
                 local ev = events[i]
                 waitUntil(startT + ev.t)
                 if not state.playing or session ~= state.currentSession then return end
-                if ev.type ~= "cam" and ev.type ~= "hrp" then
-                    pcall(applyEvent, ev)
-                end
+                if ev.type ~= "cam" and ev.type ~= "hrp" then pcall(applyEvent, ev) end
             end
             if not looped then break end
             task.wait(0.05)
@@ -2121,19 +1779,13 @@ local function playRecording(events, name, looped, rec)
         if session == state.currentSession then
             stopPlayback()
             if state.autoClick then
-                Status.Text = "⏳ Auto-click en " .. AUTO_CLICK_DELAY .. "s…"
                 task.wait(AUTO_CLICK_DELAY)
-                if not state.playing and session == state.currentSession then
-                    clickPlayAgain()
-                end
+                if not state.playing and session == state.currentSession then clickPlayAgain() end
             end
         end
     end)
 end
 
---==================================================================
---  LISTA
---==================================================================
 function refreshList()
     for _, c in ipairs(Scrolling:GetChildren()) do
         if c:IsA("Frame") or c:IsA("TextLabel") then c:Destroy() end
@@ -2155,21 +1807,18 @@ function refreshList()
         row.BackgroundColor3 = Color3.fromRGB(28, 28, 38); row.BorderSizePixel = 0
         row.LayoutOrder = i; row.Parent = Scrolling
         Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
-
         local nameLbl = Instance.new("TextLabel")
         nameLbl.Size = UDim2.new(1, -130, 0, 20); nameLbl.Position = UDim2.new(0, 10, 0, 2)
         nameLbl.BackgroundTransparency = 1; nameLbl.Text = name
         nameLbl.TextColor3 = Color3.fromRGB(230, 230, 255); nameLbl.Font = Enum.Font.GothamBold
         nameLbl.TextSize = 13; nameLbl.TextXAlignment = Enum.TextXAlignment.Left
         nameLbl.TextTruncate = Enum.TextTruncate.AtEnd; nameLbl.Parent = row
-
         local infoLbl = Instance.new("TextLabel")
         infoLbl.Size = UDim2.new(1, -130, 0, 16); infoLbl.Position = UDim2.new(0, 10, 0, 22)
         infoLbl.BackgroundTransparency = 1
         infoLbl.Text = "⏱ " .. fmtDuration(rec.duration or 0) .. "   📅 " .. fmtDate(rec.created)
         infoLbl.TextColor3 = Color3.fromRGB(150, 150, 180); infoLbl.Font = Enum.Font.Gotham
         infoLbl.TextSize = 11; infoLbl.TextXAlignment = Enum.TextXAlignment.Left; infoLbl.Parent = row
-
         local function mkSmallBtn(txt, col, x)
             local b = Instance.new("TextButton")
             b.Size = UDim2.new(0, 28, 0, 30); b.Position = UDim2.new(1, x, 0, 6)
@@ -2178,30 +1827,20 @@ function refreshList()
             b.Parent = row; Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
             return b
         end
-
         local isAutoload = (name == state.autoloadName)
-        local autoBtn = mkSmallBtn(
-            isAutoload and "🍌" or "🐵",
-            isAutoload and Color3.fromRGB(200, 160, 40) or Color3.fromRGB(90, 70, 50),
-            -124
-        )
+        local autoBtn = mkSmallBtn(isAutoload and "🍌" or "🐵",
+            isAutoload and Color3.fromRGB(200, 160, 40) or Color3.fromRGB(90, 70, 50), -124)
         autoBtn.MouseButton1Click:Connect(function()
             if state.autoloadName == name then
-                state.autoloadName = nil
-                writeAutoload(nil)
-                Status.Text = "🍌 Auto-ejecutar desactivado"
+                state.autoloadName = nil; writeAutoload(nil); Status.Text = "🍌 Auto-ejecutar desactivado"
             else
-                state.autoloadName = name
-                writeAutoload(name)
-                Status.Text = "🐵 Auto-ejecutar: " .. name
+                state.autoloadName = name; writeAutoload(name); Status.Text = "🐵 Auto-ejecutar: " .. name
             end
             refreshList()
         end)
-
         local pBtn = mkSmallBtn("▶", Color3.fromRGB(50, 150, 80), -94)
         local eBtn = mkSmallBtn("📤", Color3.fromRGB(50, 100, 150), -64)
         local dBtn = mkSmallBtn("X", Color3.fromRGB(190, 60, 60), -34)
-
         row.InputBegan:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1 then
                 local r = loadRecording(name)
@@ -2216,49 +1855,30 @@ function refreshList()
             if r and r.events then NameBox.Text = name; playRecording(r.events, name, state.looped, r) end
         end)
         eBtn.MouseButton1Click:Connect(function()
-            local rec2 = loadRecording(name)
-            if not rec2 then Status.Text = "❌ No carga"; return end
-            local okE, enc = pcall(jsonEncode, rec2)
-            if not okE then Status.Text = "❌ encode"; return end
+            local rec2 = loadRecording(name); if not rec2 then Status.Text = "❌ No carga"; return end
+            local okE, enc = pcall(jsonEncode, rec2); if not okE then Status.Text = "❌ encode"; return end
             local clipFn = getClipboardSetFn()
             if clipFn then
                 local okC = pcall(clipFn, enc)
-                if okC then Status.Text = "📤 " .. name .. " (" .. #enc .. "B)"
-                else Status.Text = "❌ clipboard" end
-            else
-                Status.Text = "⚠ sin clipboard — en consola"
-                print("=== COPY " .. name .. " ==="); print(enc); print("=== FIN ===")
-            end
+                if okC then Status.Text = "📤 " .. name .. " (" .. #enc .. "B)" else Status.Text = "❌ clipboard" end
+            else Status.Text = "⚠ sin clipboard" end
         end)
         dBtn.MouseButton1Click:Connect(function()
             deleteRecording(name)
-            if state.autoloadName == name then
-                state.autoloadName = nil
-                writeAutoload(nil)
-            end
-            Status.Text = "🗑 " .. name
-            refreshList()
+            if state.autoloadName == name then state.autoloadName = nil; writeAutoload(nil) end
+            Status.Text = "🗑 " .. name; refreshList()
         end)
     end
 end
 
---==================================================================
---  CONEXIONES
---==================================================================
-BtnRecord.MouseButton1Click:Connect(function()
-    if state.recording then stopRecording() else startRecording() end
-end)
+BtnRecord.MouseButton1Click:Connect(function() if state.recording then stopRecording() else startRecording() end end)
 BtnPlay.MouseButton1Click:Connect(function()
     local name = NameBox.Text:gsub("[^%w_%-]", "_")
     if name == "" then Status.Text = "Escribe un nombre."; return end
-    local r = loadRecording(name)
-    if not r or not r.events then Status.Text = "No existe: " .. name; return end
+    local r = loadRecording(name); if not r or not r.events then Status.Text = "No existe: " .. name; return end
     playRecording(r.events, name, state.looped, r)
 end)
-BtnStop.MouseButton1Click:Connect(function()
-    if state.recording then stopRecording() end
-    if state.playing then stopPlayback() end
-end)
+BtnStop.MouseButton1Click:Connect(function() if state.recording then stopRecording() end; if state.playing then stopPlayback() end end)
 BtnLoop.MouseButton1Click:Connect(function()
     state.looped = not state.looped
     BtnLoop.Text = "Loop: " .. (state.looped and "ON" or "OFF")
@@ -2273,37 +1893,28 @@ BtnTestClick.MouseButton1Click:Connect(function() task.spawn(clickPlayAgain) end
 BtnInspect.MouseButton1Click:Connect(inspectPath)
 BtnMark.MouseButton1Click:Connect(markPath)
 BtnCapture.MouseButton1Click:Connect(function()
-    if captureMode then captureMode = false; Status.Text = "🎯 Cancelado"
-    else startCapture() end
+    if captureMode then captureMode = false; Status.Text = "🎯 Cancelado" else startCapture() end
 end)
 ForceMouseBtn.MouseButton1Click:Connect(function()
     state.forceMouse = not state.forceMouse
-    ForceMouseBtn.BackgroundColor3 = state.forceMouse
-        and Color3.fromRGB(50, 130, 70) or Color3.fromRGB(60, 60, 80)
+    ForceMouseBtn.BackgroundColor3 = state.forceMouse and Color3.fromRGB(50, 130, 70) or Color3.fromRGB(60, 60, 80)
     Status.Text = state.forceMouse and "🖱 Forzar mouse ON" or "Método auto"
 end)
 MovToggleBtn.MouseButton1Click:Connect(function()
     state.moveEnabled = not state.moveEnabled
     if state.moveEnabled then
-        MovToggleBtn.Text = "🏃 Mov ON"
-        MovToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 130, 70)
-        Status.Text = "🏃 Movimiento del personaje ON"
+        MovToggleBtn.Text = "🏃 Mov ON"; MovToggleBtn.BackgroundColor3 = Color3.fromRGB(50, 130, 70)
+        Status.Text = "🏃 Movimiento ON"
     else
-        MovToggleBtn.Text = "🏃 Mov OFF"
-        MovToggleBtn.BackgroundColor3 = Color3.fromRGB(90, 60, 60)
-        Status.Text = "Movimiento del personaje OFF (solo teclas/touch)"
+        MovToggleBtn.Text = "🏃 Mov OFF"; MovToggleBtn.BackgroundColor3 = Color3.fromRGB(90, 60, 60)
+        Status.Text = "Movimiento OFF"
     end
 end)
-
 FixedClickBtn.MouseButton1Click:Connect(function()
     state.fixedClickActive = not state.fixedClickActive
     if state.fixedClickActive then
         local path = (PathBox.Text or ""):gsub("^%s+", ""):gsub("%s+$", "")
-        if path == "" then
-            state.fixedClickActive = false
-            Status.Text = "⚠ Escribe primero el path del botón a vigilar"
-            return
-        end
+        if path == "" then state.fixedClickActive = false; Status.Text = "⚠ Escribe el path"; return end
         fixedBtnWasVisible = false
         FixedClickBtn.Text = "🎯 Vigilar botón → click en (" .. FIXED_CLICK_X .. "," .. FIXED_CLICK_Y .. "): ON"
         FixedClickBtn.BackgroundColor3 = Color3.fromRGB(50, 130, 70)
@@ -2312,8 +1923,7 @@ FixedClickBtn.MouseButton1Click:Connect(function()
     else
         FixedClickBtn.Text = "🎯 Vigilar botón → click en (" .. FIXED_CLICK_X .. "," .. FIXED_CLICK_Y .. "): OFF"
         FixedClickBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
-        FixedMarker.Visible = false
-        Status.Text = "Auto-click por visibilidad desactivado"
+        FixedMarker.Visible = false; Status.Text = "Auto-click desactivado"
     end
 end)
 
@@ -2324,46 +1934,21 @@ ImportBtn.MouseButton1Click:Connect(function()
     local saved, skipped, err, fname, method = importFromText(raw)
     if err then Status.Text = "❌ " .. err:sub(1, 60); return end
     if fname and saved == 1 then NameBox.Text = fname end
-    Status.Text = "📥 " .. saved .. " (" .. skipped .. ") via " .. tostring(method or "?")
-    refreshList()
+    Status.Text = "📥 " .. saved .. " (" .. skipped .. ")"; refreshList()
 end)
-
 OpenFileBtn.MouseButton1Click:Connect(function()
     if not hasFS then Status.Text = "❌ executor sin FS"; return end
     local fname = NameBox.Text:gsub("[^%w_%-]", "_")
-    if fname == "" then
-        local files = {}
-        if activeFolder and type(listfiles) == "function" then
-            local okL, list = pcall(listfiles, activeFolder)
-            if okL and list then
-                for _, f in ipairs(list) do
-                    local base = tostring(f):match("([^/\\]+)%.json$")
-                    if base and base ~= "index" and base ~= "autoload" then table.insert(files, base) end
-                end
-            end
-        end
-        if #files == 0 then Status.Text = "❌ No hay .json en " .. tostring(activeFolder)
-        else Status.Text = "📂 Escribe uno: " .. table.concat(files, ", "):sub(1, 80) end
-        return
-    end
+    if fname == "" then Status.Text = "📂 Escribe nombre del archivo"; return end
     local target = activeFolder .. fname .. ".json"
-    if not isfile(target) then
-        Status.Text = "❌ No existe " .. target
-        print("[MacroRec] No existe: " .. target)
-        return
-    end
-    local ok, raw = pcall(readfile, target)
-    if not ok or not raw then Status.Text = "❌ readfile falló"; return end
-    print("[MacroRec] 📂 abriendo " .. target .. " (" .. #raw .. " bytes)")
+    if not isfile(target) then Status.Text = "❌ No existe " .. target; return end
+    local ok, raw = pcall(readfile, target); if not ok or not raw then Status.Text = "❌ readfile falló"; return end
     local saved, skipped, err, first, method = importFromText(raw)
-    if err then Status.Text = "❌ " .. err:sub(1, 60); print("[MacroRec] " .. err); return end
+    if err then Status.Text = "❌ " .. err:sub(1, 60); return end
     if first and saved == 1 then NameBox.Text = first end
-    Status.Text = "📂 " .. saved .. " (" .. skipped .. ") via " .. tostring(method or "?")
-    refreshList()
+    Status.Text = "📂 " .. saved .. " (" .. skipped .. ")"; refreshList()
 end)
-
 PasteBtn.MouseButton1Click:Connect(function() openPasteModal() end)
-
 ExportAllBtn.MouseButton1Click:Connect(function()
     local all = {}
     for _, name in ipairs(getAllNames()) do
@@ -2371,59 +1956,37 @@ ExportAllBtn.MouseButton1Click:Connect(function()
     end
     if #all == 0 then Status.Text = "❌ Nada"; return end
     local clipFn = getClipboardSetFn()
-    if not clipFn then
-        Status.Text = "⚠ sin clipboard — en consola"
-        print("=== EXPORT ALL ==="); print(jsonEncode(all)); print("=== FIN ===")
-        return
-    end
-    local okE, enc = pcall(jsonEncode, all)
-    if not okE then Status.Text = "❌ encode"; return end
+    if not clipFn then Status.Text = "⚠ sin clipboard"; print(jsonEncode(all)); return end
+    local okE, enc = pcall(jsonEncode, all); if not okE then Status.Text = "❌ encode"; return end
     local okC = pcall(clipFn, enc)
-    if okC then Status.Text = "📤 " .. #all .. " copiadas (" .. #enc .. "B)"
-    else Status.Text = "❌ clipboard"; print("=== EXPORT ALL ==="); print(enc); print("=== FIN ===") end
+    if okC then Status.Text = "📤 " .. #all .. " copiadas (" .. #enc .. "B)" else Status.Text = "❌ clipboard" end
 end)
-RefreshBtn.MouseButton1Click:Connect(function()
-    refreshList(); Status.Text = "Recargado"
-end)
-StopOverlay.MouseButton1Click:Connect(function()
-    if state.recording then stopRecording() end
-    if state.playing then stopPlayback() end
-end)
+RefreshBtn.MouseButton1Click:Connect(function() refreshList(); Status.Text = "Recargado" end)
+StopOverlay.MouseButton1Click:Connect(function() if state.recording then stopRecording() end; if state.playing then stopPlayback() end end)
 CloseBtn.MouseButton1Click:Connect(function()
     if state.recording then stopRecording() end
     if state.playing then stopPlayback() end
-    releaseAllTouches()
-    unlockCamera()
-    restoreWindow()
+    releaseAllTouches(); unlockCamera(); restoreWindow()
     pcall(function() ScreenGui:Destroy() end); pcall(function() OverlayGui:Destroy() end)
 end)
 
 PMFromClip.MouseButton1Click:Connect(function()
     if not hasGetClipboard then PMCount.Text = "❌ getclipboard no disponible"; return end
     local ok, raw = pcall(getclipboard)
-    if ok and raw and raw ~= "" then PMBox.Text = raw
-    else PMCount.Text = "❌ Portapapeles vacío" end
+    if ok and raw and raw ~= "" then PMBox.Text = raw else PMCount.Text = "❌ Portapapeles vacío" end
 end)
 PMCancel.MouseButton1Click:Connect(closePasteModal)
 PMCargar.MouseButton1Click:Connect(function()
     local raw = PMBox.Text
     if not raw or raw:gsub("%s", "") == "" then PMCount.Text = "❌ Caja vacía"; return end
     local saved, skipped, err, fname, method = importFromText(raw)
-    if err then
-        PMCount.Text = "❌ " .. err
-        print("[MacroRec] Import error: " .. err)
-        return
-    end
+    if err then PMCount.Text = "❌ " .. err; return end
     if fname and saved == 1 then NameBox.Text = fname end
-    Status.Text = "📋 " .. saved .. " (" .. skipped .. ") via " .. tostring(method or "?")
-    closePasteModal()
-    refreshList()
+    Status.Text = "📋 " .. saved .. " (" .. skipped .. ")"; closePasteModal(); refreshList()
 end)
 PMBackdrop.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1
-       or input.UserInputType == Enum.UserInputType.Touch then
-        closePasteModal()
-    end
+       or input.UserInputType == Enum.UserInputType.Touch then closePasteModal() end
 end)
 
 UserInputService.InputBegan:Connect(function(input, gp)
@@ -2441,9 +2004,7 @@ UserInputService.InputBegan:Connect(function(input, gp)
         if state.recording then stopRecording() end
         if state.playing then stopPlayback() end
     elseif input.KeyCode == Enum.KeyCode.F11 then
-        if FixedClickBtn and FixedClickBtn.Parent then
-            FixedClickBtn:FireClick()
-        end
+        if FixedClickBtn and FixedClickBtn.Parent then FixedClickBtn:FireClick() end
     end
 end)
 
@@ -2456,58 +2017,35 @@ do
     local lastVP = currentViewport()
     local conn
     conn = RunService.RenderStepped:Connect(function()
-        if not Main or not Main.Parent then
-            pcall(function() conn:Disconnect() end)
-            return
-        end
+        if not Main or not Main.Parent then pcall(function() conn:Disconnect() end); return end
         local vp = currentViewport()
-        if vp.X ~= lastVP.X or vp.Y ~= lastVP.Y then
-            lastVP = vp
-            pcall(updateGuiScale)
-        end
+        if vp.X ~= lastVP.X or vp.Y ~= lastVP.Y then lastVP = vp; pcall(updateGuiScale) end
     end)
 end
 
 state.autoloadName = readAutoload()
-if state.autoloadName then
-    print("[MacroRec] 🍌 Auto-load configurada: " .. state.autoloadName)
-end
-
 refreshList()
 
-if not hasFS then Status.Text = "⚠ Sin FS: usa 📤/📋 entre juegos"
-elseif isSharedFolder then Status.Text = "✅ Compartida: " .. activeFolder
-else Status.Text = "⚠ Carpeta per-game: " .. activeFolder end
+if not hasFS then Status.Text = "⚠ Sin FS"
+elseif isSharedFolder then Status.Text = "✅ " .. activeFolder
+else Status.Text = "⚠ per-game: " .. activeFolder end
 
 if AUTO_LOAD_OUTPUT then
     local trimmed = AUTO_LOAD_JSON:gsub("^%s+", ""):gsub("%s+$", "")
     if #trimmed > 10 then
-        print("[MacroRec] AUTO_LOAD: JSON de " .. #trimmed .. "B")
         local saved, skipped, err, fname, method = importFromText(trimmed)
-        if err then
-            warn("[MacroRec] AUTO_LOAD falló: " .. tostring(err))
-            Status.Text = "⚠ AUTO_LOAD: " .. tostring(err):sub(1, 60)
-        else
-            print("[MacroRec] AUTO_LOAD OK via " .. tostring(method) .. " → " .. saved)
-            if fname and saved == 1 then NameBox.Text = fname; Status.Text = "✅ AUTO_LOAD: " .. fname
-            else Status.Text = "✅ AUTO_LOAD: " .. saved .. " grabaciones" end
+        if not err then
+            if fname and saved == 1 then NameBox.Text = fname end
             refreshList()
         end
-    else
-        print("[MacroRec] AUTO_LOAD_JSON vacío (" .. #trimmed .. "B)")
     end
 end
 
 if state.autoloadName then
     local r = loadRecording(state.autoloadName)
     if not r or not r.events then
-        print("[MacroRec] ⚠ Auto-load: '" .. state.autoloadName .. "' no existe. Limpiando.")
-        state.autoloadName = nil
-        writeAutoload(nil)
-        refreshList()
+        state.autoloadName = nil; writeAutoload(nil); refreshList()
     else
-        print(string.format("[MacroRec] 🐵 Auto-ejecutando '%s' en %.1fs…",
-            state.autoloadName, AUTO_EXECUTE_DELAY))
         local nameToPlay = state.autoloadName
         task.spawn(function()
             task.wait(AUTO_EXECUTE_DELAY)
@@ -2516,21 +2054,35 @@ if state.autoloadName then
                 Status.Text = "🐵 Auto-ejecutando: " .. nameToPlay
                 NameBox.Text = nameToPlay
                 playRecording(r2.events, nameToPlay, state.looped, r2)
-            else
-                Status.Text = "⚠ Auto-load: " .. nameToPlay .. " desapareció"
             end
         end)
     end
 end
 
-print("=== Macro Recorder v8.5 ===")
-print(string.format("[Plataforma] Touch=%s Mouse=%s Keyboard=%s | firetouchinput=%s VIM=%s",
-    tostring(TouchEnabled), tostring(MouseEnabled), tostring(KeyboardEnabled),
-    tostring(hasFireTouchInput), tostring(hasVIMSendMouse)))
-print(string.format("[Viewport inicial] %dx%d",
-    currentViewport().X, currentViewport().Y))
-print(string.format("[Auto-click] vigilar botón del PathBox → cursor a (%d,%d) y click | cooldown %.2fs",
-    FIXED_CLICK_X, FIXED_CLICK_Y, FIXED_CLICK_COOLDOWN))
-print("F8=Grabar  F9=Reproducir  F10=Detener  F11=Vigilar botón ON/OFF")
-print("🐵 = auto-ejecutar  🍌 = quitar  |  🎯 = vigilar botón → click (559,511)")
-print("Carpeta activa: " .. tostring(activeFolder))
+print("=== Macro Recorder v8.7 ===")
+print(string.format("[Plataforma] Touch=%s Mouse=%s Keyboard=%s", tostring(TouchEnabled), tostring(MouseEnabled), tostring(KeyboardEnabled)))
+print(string.format("[Viewport] %dx%d", currentViewport().X, currentViewport().Y))
+print("F8=Grabar F9=Reproducir F10=Detener F11=Vigilar botón")
+print("Carpeta: " .. tostring(activeFolder))
+
+-- Verificación de GUI a los 2 segundos
+task.spawn(function()
+    task.wait(2)
+    if not ScreenGui or not ScreenGui.Parent then
+        warn("[MacroRec] ❌ GUI destruido o sin parent tras 2s")
+        return
+    end
+    print(string.format("[MacroRec] 🔍 GUI: parent=%s | AbsoluteSize=%dx%d | Scale=%.2f | Pos=(%d,%d) | Main.Visible=%s",
+        tostring(ScreenGui.Parent), Main.AbsoluteSize.X, Main.AbsoluteSize.Y,
+        MainScale.Scale, Main.AbsolutePosition.X, Main.AbsolutePosition.Y, tostring(Main.Visible)))
+    if Main.AbsoluteSize.X <= 0 or Main.AbsoluteSize.Y <= 0 then
+        warn("[MacroRec] ⚠️ GUI sin tamaño visible, intentando CoreGui...")
+        local ok, cg = pcall(function() return game:GetService("CoreGui") end)
+        if ok and cg then
+            pcall(function() ScreenGui.Parent = cg end)
+            task.wait(0.5)
+            print(string.format("[MacroRec] Re-parent a CoreGui: size=%dx%d",
+                Main.AbsoluteSize.X, Main.AbsoluteSize.Y))
+        end
+    end
+end)
