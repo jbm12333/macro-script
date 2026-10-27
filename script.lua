@@ -1,10 +1,11 @@
 --[[
 ================================================================================
-  MACRO RECORDER v8.5.5 — Auto-click disparado por visibilidad de botón
+  MACRO RECORDER v8.5.6 — Auto-click disparado por visibilidad de botón
                               + Persistencia del watcher
                               + FIX: Out of local registers (límite 200)
                               + Delay de 2s antes de hacer click
                               + Movimiento: ir a 559 -> deslizar a 554 -> click
+                              + Arrastre de GUI mejorado (Funciona en móviles)
 ================================================================================
 ]]
 
@@ -89,12 +90,11 @@ local BAR_W      = 170
 local BAR_H      = 52
 
 --============ AUTO-CLICK POR VISIBILIDAD DE BOTÓN ============
--- Coordenada inicial de destino (559, 511). Luego se desplazará 5 píxeles a la izquierda.
 local FIXED_CLICK_X        = 559
 local FIXED_CLICK_Y        = 511
 local FIXED_CLICK_COOLDOWN = 0.4
-local FIXED_CLICK_DELAY    = 2.0  -- ⏳ Delay de 2 segundos tras ser visible
-local SLIDE_LEFT_PIXELS    = 5    -- ⬅️ Píxeles a la izquierda antes del click
+local FIXED_CLICK_DELAY    = 2.0
+local SLIDE_LEFT_PIXELS    = 5
 
 local DEBUG_KEYS = true
 local FORCE_VIM  = false
@@ -272,6 +272,7 @@ do
     Main.Position = UDim2.new(0, 20, 0, 40)
     Main.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
     Main.BorderSizePixel = 0; Main.Parent = ScreenGui
+    Main.Active = true
     Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 8)
     local MainStroke = Instance.new("UIStroke", Main)
     MainStroke.Color = Color3.fromRGB(70, 70, 100)
@@ -288,7 +289,7 @@ do
 
     Title = Instance.new("TextLabel")
     Title.Size = UDim2.new(1, -40, 1, 0); Title.Position = UDim2.new(0, 12, 0, 0)
-    Title.BackgroundTransparency = 1; Title.Text = "● Macro Recorder v8.5.5"
+    Title.BackgroundTransparency = 1; Title.Text = "● Macro Recorder v8.5.6"
     Title.TextColor3 = Color3.fromRGB(210, 210, 255)
     Title.Font = Enum.Font.GothamBold; Title.TextSize = 13
     Title.TextXAlignment = Enum.TextXAlignment.Left; Title.Parent = TitleBar
@@ -300,16 +301,29 @@ do
     CloseBtn.TextSize = 13; CloseBtn.BorderSizePixel = 0; CloseBtn.Parent = TitleBar
     Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 4)
 
-    local dragging, dragStart, startPos = false, nil, nil
-    TitleBar.InputBegan:Connect(function(input)
+    -- ===== ARRASTRE DE GUI MEJORADO (MÓVIL Y PC) =====
+    local dragging = false
+    local dragStart, startPos
+
+    local function isPointOverTitleBar(px, py)
+        if not TitleBar or not TitleBar.Parent then return false end
+        local ap = TitleBar.AbsolutePosition
+        local as = TitleBar.AbsoluteSize
+        return px >= ap.X and px <= ap.X + as.X and py >= ap.Y and py <= ap.Y + as.Y
+    end
+
+    UserInputService.InputBegan:Connect(function(input, gp)
+        if gp then return end
         if input.UserInputType == Enum.UserInputType.MouseButton1
            or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true; dragStart = input.Position; startPos = Main.Position
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then dragging = false end
-            end)
+            if isPointOverTitleBar(input.Position.X, input.Position.Y) then
+                dragging = true
+                dragStart = input.Position
+                startPos = Main.Position
+            end
         end
     end)
+
     UserInputService.InputChanged:Connect(function(input)
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
            or input.UserInputType == Enum.UserInputType.Touch) then
@@ -318,6 +332,14 @@ do
                                       startPos.Y.Scale, startPos.Y.Offset + d.Y)
         end
     end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+           or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    -- =================================================
 
     Chrono = Instance.new("TextLabel")
     Chrono.Size = UDim2.new(1, -20, 0, 34); Chrono.Position = UDim2.new(0, 10, 0, 36)
@@ -492,7 +514,6 @@ do
     pcall(function() OverlayGui.Parent = guiParent end)
     if not OverlayGui.Parent then OverlayGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
-    -- El marcador visual ahora mostrará la posición final del click
     FixedMarker = Instance.new("Frame")
     FixedMarker.Size = UDim2.new(0, 16, 0, 16)
     FixedMarker.Position = UDim2.new(0, (FIXED_CLICK_X - SLIDE_LEFT_PIXELS) - 8, 0, FIXED_CLICK_Y - 8)
@@ -595,7 +616,7 @@ local function restoreWindow()
             d:SetAttribute("_MRVisSaved", nil)
         end
     end
-    Title.Text = "● Macro Recorder v8.5.5"
+    Title.Text = "● Macro Recorder v8.5.6"
     CloseBtn.Visible = true
 end
 
@@ -1471,7 +1492,7 @@ local function moveCursorAndClick()
     -- 1. Mover a la posición inicial absoluta
     if fn.mousemoveabs then
         pcall(fn.mousemoveabs, FIXED_CLICK_X, FIXED_CLICK_Y)
-        task.wait(0.1) -- Pausa breve para asentar el ratón
+        task.wait(0.1)
     end
 
     -- 2. Desplazar X píxeles a la izquierda
@@ -1479,11 +1500,9 @@ local function moveCursorAndClick()
     local finalY = FIXED_CLICK_Y
 
     if fn.mousemoverel then
-        -- Si el executor soporta movimiento relativo, lo usamos para que sea un deslizamiento físico
         pcall(fn.mousemoverel, -SLIDE_LEFT_PIXELS, 0)
-        task.wait(0.1) -- Pausa breve antes de clickear
+        task.wait(0.1)
     else
-        -- Fallback: si no hay mousemoverel, hacemos un mousemoveabs a la posición calculada
         if fn.mousemoveabs then
             pcall(fn.mousemoveabs, finalX, finalY)
             task.wait(0.1)
@@ -1517,7 +1536,6 @@ local function moveCursorAndClick()
         clicked = true
     end
     
-    -- Efecto visual en la posición final
     clickCircle(finalX, finalY, Color3.fromRGB(255, 200, 50))
     return clicked
 end
@@ -2635,7 +2653,7 @@ if state.autoloadName then
     end
 end
 
-print("=== Macro Recorder v8.5.5 ===")
+print("=== Macro Recorder v8.5.6 ===")
 print(string.format("[Plataforma] Touch=%s Mouse=%s Keyboard=%s | firetouchinput=%s VIM=%s",
     tostring(TouchEnabled), tostring(MouseEnabled), tostring(KeyboardEnabled),
     tostring(hasFireTouchInput), tostring(hasVIMSendMouse)))
