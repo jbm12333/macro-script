@@ -221,6 +221,7 @@ local state = {
     fixedClickLastBtn = nil,
     injecting = false,
     overdubEvents = nil,   -- eventos extra grabados durante playback
+    overdubEnabled = true, -- permite activar/desactivar overdub desde la interfaz
     playingName = nil,     -- nombre de la grabación que se está reproduciendo
 }
 
@@ -242,7 +243,7 @@ local camSetting         = false
 --==================================================================
 local ScreenGui, Main, TitleBar, Title, CloseBtn, Chrono, RecDot, WarnBanner, NameBox
 local BtnRecord, BtnPlay, BtnStop, BtnLoop, BtnAuto, PathBox, BtnTestClick
-local BtnInspect, BtnMark, BtnCapture, ForceMouseBtn, MovToggleBtn, FixedClickBtn
+local BtnInspect, BtnMark, BtnCapture, ForceMouseBtn, MovToggleBtn, FixedClickBtn, OverdubBtn
 local ListHeaderLbl, ImportBtn, OpenFileBtn, PasteBtn, ExportAllBtn, RefreshBtn
 local Scrolling, Status, PlatformBadge, MainScale
 local OverlayGui, FixedMarker, Cursor, KeysLabel, StopOverlay
@@ -445,7 +446,7 @@ do
 
     local fixedY = autoY2 + 30
     FixedClickBtn = Instance.new("TextButton")
-    FixedClickBtn.Size = UDim2.new(1, -20, 0, 24)
+    FixedClickBtn.Size = UDim2.new(0, 225, 0, 24)
     FixedClickBtn.Position = UDim2.new(0, 10, 0, fixedY)
     FixedClickBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
     FixedClickBtn.Text = "🎯 Vigilar botón → click en (" .. (FIXED_CLICK_X - SLIDE_LEFT_PIXELS) .. "," .. FIXED_CLICK_Y .. "): OFF"
@@ -455,6 +456,18 @@ do
     FixedClickBtn.BorderSizePixel = 0
     FixedClickBtn.Parent = Main
     Instance.new("UICorner", FixedClickBtn).CornerRadius = UDim.new(0, 4)
+
+    OverdubBtn = Instance.new("TextButton")
+    OverdubBtn.Size = UDim2.new(0, 155, 0, 24)
+    OverdubBtn.Position = UDim2.new(0, 245, 0, fixedY)
+    OverdubBtn.BackgroundColor3 = Color3.fromRGB(50, 130, 70)
+    OverdubBtn.Text = "🎙 Overdub: ON"
+    OverdubBtn.TextColor3 = Color3.new(1, 1, 1)
+    OverdubBtn.Font = Enum.Font.GothamBold
+    OverdubBtn.TextSize = 11
+    OverdubBtn.BorderSizePixel = 0
+    OverdubBtn.Parent = Main
+    Instance.new("UICorner", OverdubBtn).CornerRadius = UDim.new(0, 4)
 
     local ListHeader = Instance.new("Frame")
     ListHeader.Size = UDim2.new(1, -20, 0, 22); ListHeader.Position = UDim2.new(0, 10, 0, fixedY + 28)
@@ -2324,6 +2337,13 @@ do
         if state.recording then stopRecording() end
         if state.playing then stopPlayback() end
     end)
+    OverdubBtn.MouseButton1Click:Connect(function()
+        state.overdubEnabled = not state.overdubEnabled
+        OverdubBtn.Text = state.overdubEnabled and "🎙 Overdub: ON" or "🎙 Overdub: OFF"
+        OverdubBtn.BackgroundColor3 = state.overdubEnabled
+            and Color3.fromRGB(50, 130, 70) or Color3.fromRGB(60, 60, 80)
+        Status.Text = state.overdubEnabled and "Overdub activado" or "Overdub desactivado"
+    end)
     BtnLoop.MouseButton1Click:Connect(function()
         state.looped = not state.looped
         BtnLoop.Text = "Loop: " .. (state.looped and "ON" or "OFF")
@@ -2516,7 +2536,7 @@ do
     local function pushLive(ev)
         if state.recording then
             pushEvent(ev)
-        elseif state.playing and state.overdubEvents and state.playLoopStart then
+        elseif state.playing and state.overdubEnabled and state.overdubEvents and state.playLoopStart then
             ev.t = os.clock() - state.playLoopStart
             table.insert(state.overdubEvents, ev)
         end
