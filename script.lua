@@ -78,9 +78,9 @@ local AUTO_CLICK_POLL    = 0.2
 
 local REC_MOUSE_MIN_PIXELS = 3
 local REC_TOUCH_MIN_PIXELS = 4
-local REC_CAM_POS_THRESH   = 0.35
-local REC_CAM_ROT_THRESH   = 0.03
-local REC_CAM_FOV_THRESH   = 0.5
+local REC_CAM_POS_THRESH   = 0.001
+local REC_CAM_ROT_THRESH   = 0.00001
+local REC_CAM_FOV_THRESH   = 0.05
 local REC_HRP_POS_THRESH   = 0.10
 local REC_HRP_ROT_THRESH   = 0.08
 
@@ -1290,7 +1290,8 @@ local function playbackRenderStep()
     if camKFs and #camKFs > 0 then
         local a, b, alpha = findBracket(camKFs, elapsed)
         if a and b then
-            local cf = a.cf:Lerp(b.cf, alpha)
+            -- Sin suavizado: aplicar exactamente el último fotograma de cámara grabado.
+            local cf = a.cf
             lastAppliedCamCF = cf
             local cam = workspace.CurrentCamera
             if cam then
@@ -1302,7 +1303,7 @@ local function playbackRenderStep()
                 if fovA or fovB then
                     fovA = fovA or fovB
                     fovB = fovB or fovA
-                    local fov = fovA + (fovB - fovA) * alpha
+                    local fov = fovA
                     lastAppliedCamFOV = fov
                     cam.FieldOfView = fov
                 end
