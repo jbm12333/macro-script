@@ -1715,6 +1715,7 @@ local function startRecording()
     state.events = {}; state.recordStart = os.clock(); state.recording = true
     lastMousePos, lastCamCFrame, lastCamFOV = Vector2.new(-100,-100), nil, nil
     lastHrpCFrame = nil
+    state.lastMotionCapture = nil
     resetTouchRecording()
 
     local char = LocalPlayer.Character
@@ -2639,6 +2640,48 @@ do
         if vp.X ~= lastVP.X or vp.Y ~= lastVP.Y then
             lastVP = vp
             pcall(updateGuiScale)
+        end
+
+        -- Captura continua de cámara, personaje y cursor durante la grabación.
+        -- Se limita la frecuencia para evitar archivos enormes, pero conserva
+        -- suficientes keyframes para reproducir giros y desplazamientos suaves.
+        if state.recording and not state.injecting then
+            local now = os.clock()
+            if not state.lastMotionCapture or (now - state.lastMotionCapture) >= (1 / 30) then
+                state.lastMotionCapture = now
+
+                local cam = workspace.CurrentCamera
+                if cam then
+                    local cf = cam.CFrame
+                    local fov = cam.FieldOfView
+                    if cframesDiffer(lastCamCFrame, cf, 0.015, 0.0015)
+                       or not lastCamFOV or math.abs(fov - lastCamFOV) >= 0.15 then
+                        pushEvent({ type = "cam", cframe = { cf:GetComponents() }, fov = fov })
+                        lastCamCFrame = cf
+                        lastCamFOV = fov
+                    end
+                end
+
+                local char = LocalPlayer.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local cf = hrp.CFrame
+                    if cframesDiffer(lastHrpCFrame, cf, 0.04, 0.003) then
+                        pushEvent({ type = "hrp", cframe = { cf:GetComponents() } })
+                        lastHrpCFrame = cf
+                    end
+                end
+
+                if MouseEnabled then
+                    local mp = UserInputService:GetMouseLocation()
+                    if (mp - lastMousePos).Magnitude >= REC_MOUSE_MIN_PIXELS then
+                        local vpNow = currentViewport()
+                        pushEvent({ type = "mouse", x = mp.X, y = mp.Y,
+                            viewportX = vpNow.X, viewportY = vpNow.Y })
+                        lastMousePos = mp
+                    end
+                end
+            end
         end
     end)
 end
