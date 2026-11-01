@@ -301,43 +301,56 @@ do
     CloseBtn.TextSize = 13; CloseBtn.BorderSizePixel = 0; CloseBtn.Parent = TitleBar
     Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 4)
 
-    -- ===== ARRASTRE DE GUI MEJORADO (MÓVIL Y PC) =====
-    local dragging = false
-    local dragStart, startPos
+        -- ===== ARRASTRE DE GUI MEJORADO (MÓVIL Y PC) =====
+    local dragging  = false
+    local dragInput = nil
+    local dragStart = nil
+    local startPos  = nil
 
-    local function isPointOverTitleBar(px, py)
-        if not TitleBar or not TitleBar.Parent then return false end
-        local ap = TitleBar.AbsolutePosition
-        local as = TitleBar.AbsoluteSize
-        return px >= ap.X and px <= ap.X + as.X and py >= ap.Y and py <= ap.Y + as.Y
+    local function updateDrag(input)
+        if not dragging or not dragStart then return end
+        local delta = input.Position - dragStart
+        Main.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
     end
 
-    UserInputService.InputBegan:Connect(function(input, gp)
-        if gp then return end
+    TitleBar.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1
            or input.UserInputType == Enum.UserInputType.Touch then
-            if isPointOverTitleBar(input.Position.X, input.Position.Y) then
-                dragging = true
-                dragStart = input.Position
-                startPos = Main.Position
-            end
+            dragging  = true
+            dragInput = input
+            dragStart = input.Position
+            startPos  = Main.Position
+
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging  = false
+                    dragInput = nil
+                    dragStart = nil
+                end
+            end)
+        end
+    end)
+
+    TitleBar.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+           or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
         end
     end)
 
     UserInputService.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-           or input.UserInputType == Enum.UserInputType.Touch) then
-            local d = input.Position - dragStart
-            Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X,
-                                      startPos.Y.Scale, startPos.Y.Offset + d.Y)
+        if input == dragInput then
+            updateDrag(input)
         end
     end)
 
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-           or input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
-        end
+    ScreenGui.Destroying:Connect(function()
+        dragging  = false
+        dragInput = nil
+        dragStart = nil
     end)
     -- =================================================
 
