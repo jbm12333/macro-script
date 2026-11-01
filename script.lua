@@ -1975,6 +1975,28 @@ local function fireLegacyPan(x, y)
     end
 end
 
+local function sendRecordedMouseButton(x, y, button, isDown)
+    -- Prefer coordinate-based injection: mouse1press alone clicks wherever
+    -- the physical cursor happens to be, not necessarily where the macro clicked.
+    if x ~= nil and y ~= nil and hasVIMSendMouse then
+        local sx, sy = scalePoint(x, y)
+        local ok = pcall(function()
+            VirtualInputManager:SendMouseButtonEvent(sx, sy, button, isDown, game, 0)
+        end)
+        if ok then return true end
+    end
+
+    -- Compatibility fallback for executors without coordinate-based VIM.
+    local fallback = button == 0
+        and (isDown and fn.mouse1press or fn.mouse1release)
+        or (isDown and fn.mouse2press or fn.mouse2release)
+    if type(fallback) == "function" then
+        local ok = pcall(fallback)
+        return ok
+    end
+    return false
+end
+
 local function applyEvent(ev)
     local t = ev.type
     if t == "keydown" then
@@ -1986,17 +2008,17 @@ local function applyEvent(ev)
         if kc then doKeyRelease(kc) end
         state.activeKeys[ev.key] = nil
     elseif t == "m1down" then
-        if fn.mouse1press then pcall(fn.mouse1press) end
+        sendRecordedMouseButton(ev.x, ev.y, 0, true)
         local cx, cy = Cursor.AbsolutePosition.X + 7, Cursor.AbsolutePosition.Y + 7
         clickCircle(cx, cy, Color3.fromRGB(255, 90, 90))
     elseif t == "m1up" then
-        if fn.mouse1release then pcall(fn.mouse1release) end
+        sendRecordedMouseButton(ev.x, ev.y, 0, false)
     elseif t == "m2down" then
-        if fn.mouse2press then pcall(fn.mouse2press) end
+        sendRecordedMouseButton(ev.x, ev.y, 1, true)
         local cx, cy = Cursor.AbsolutePosition.X + 7, Cursor.AbsolutePosition.Y + 7
         clickCircle(cx, cy, Color3.fromRGB(90, 150, 255))
     elseif t == "m2up" then
-        if fn.mouse2release then pcall(fn.mouse2release) end
+        sendRecordedMouseButton(ev.x, ev.y, 1, false)
     elseif t == "wheel" then
         if fn.mousescroll then pcall(fn.mousescroll, ev.delta) end
     elseif t == "mouse" then
@@ -2534,8 +2556,8 @@ do
            or input.KeyCode == Enum.KeyCode.F10 or isOverGui() then return end
         if input.UserInputType == Enum.UserInputType.Keyboard then
             pushEvent({ type = "keydown", key = input.KeyCode.Name })
-        elseif input.UserInputType == Enum.UserInputType.MouseButton1 then pushEvent({ type = "m1down" })
-        elseif input.UserInputType == Enum.UserInputType.MouseButton2 then pushEvent({ type = "m2down" }) end
+        elseif input.UserInputType == Enum.UserInputType.MouseButton1 then local p = UserInputService:GetMouseLocation(); pushEvent({ type = "m1down", x = p.X, y = p.Y })
+        elseif input.UserInputType == Enum.UserInputType.MouseButton2 then local p = UserInputService:GetMouseLocation(); pushEvent({ type = "m2down", x = p.X, y = p.Y }) end
     end)
     UserInputService.InputEnded:Connect(function(input, gp)
         if not (state.recording or (state.playing and state.overdubEnabled)) or UserInputService:GetFocusedTextBox() then return end
@@ -2543,8 +2565,8 @@ do
            or input.KeyCode == Enum.KeyCode.F10 or isOverGui() then return end
         if input.UserInputType == Enum.UserInputType.Keyboard then
             pushEvent({ type = "keyup", key = input.KeyCode.Name })
-        elseif input.UserInputType == Enum.UserInputType.MouseButton1 then pushEvent({ type = "m1up" })
-        elseif input.UserInputType == Enum.UserInputType.MouseButton2 then pushEvent({ type = "m2up" }) end
+        elseif input.UserInputType == Enum.UserInputType.MouseButton1 then local p = UserInputService:GetMouseLocation(); pushEvent({ type = "m1up", x = p.X, y = p.Y })
+        elseif input.UserInputType == Enum.UserInputType.MouseButton2 then local p = UserInputService:GetMouseLocation(); pushEvent({ type = "m2up", x = p.X, y = p.Y }) end
     end)
     UserInputService.InputChanged:Connect(function(input)
         if not (state.recording or (state.playing and state.overdubEnabled)) then return end
