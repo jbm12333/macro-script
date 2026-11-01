@@ -219,6 +219,9 @@ local state = {
     fixedClickActive  = false,
     fixedClickLastAt  = 0,
     fixedClickLastBtn = nil,
+    injecting = false,
+    overdubEvents = nil,   -- eventos extra grabados durante playback
+    playingName = nil,     -- nombre de la grabación que se está reproduciendo
 }
 
 --============ CAMERA LOCK ============
@@ -1951,6 +1954,7 @@ local function fireLegacyPan(x, y)
 end
 
 local function applyEvent(ev)
+    state.injecting = true
     local t = ev.type
     if t == "keydown" then
         local kc = Enum.KeyCode[ev.key]
@@ -2002,8 +2006,8 @@ local function applyEvent(ev)
     end
     refreshKeysLabel()
     pcall(function() MacroInput:Fire(ev) end)
+    state.injecting = false
 end
-
 local function restoreHumanoid()
     local h = state.controlledHumanoid
     local s = state.savedHumanoid
@@ -2034,17 +2038,48 @@ local function stopPlayback()
         local kc = Enum.KeyCode[k]; if kc then doKeyRelease(kc) end
     end
     state.activeKeys = {}; KeysLabel.Text = ""
-    Status.Text = "Detenido."
-end
 
+    -- ---- OVERDUB: mergear y guardar ----
+    local extra = state.overdubEvents
+    local pname = state.playingName
+    local pevents = state.playingEvents
+    local prec = state.playingRec
+    state.overdubEvents = nil
+    state.playingName = nil
+    state.playingEvents = nil
+    state.playingRec = nil
+
+    if extra and #extra > 0 and pname and pevents then
+        for _, ev in ipairs(extra) do table.insert(pevents, ev) end
+        table.sort(pevents, function(a, b) return (a.t or 0) < (b.t or 0) end)
+        local duration = 0
+        for _, ev in ipairs(pevents) do
+            if (ev.t or 0) > duration then duration = ev.t end
+        end
+        local saveExtra = {}
+        if prec then
+            if prec.startHrpCFrame then saveExtra.startHrpCFrame = prec.startHrpCFrame end
+            if prec.startCamCFrame then saveExtra.startCamCFrame = prec.startCamCFrame end
+            if prec.startCamFOV    then saveExtra.startCamFOV    = prec.startCamFOV    end
+            if prec.startViewport  then saveExtra.startViewport  = prec.startViewport  end
+        end
+        local okS = saveRecording(pname, pevents, duration, prec and prec.created, saveExtra)
+        print(string.format("[MacroRec] 🎙 Overdub: +%d eventos → %s (%s)",
+            #extra, pname, okS and "guardado" or "solo memoria"))
+        Status.Text = string.format("🎙 Overdub: +%d eventos en '%s'", #extra, pname)
+        pcall(refreshList)
+    else
+        Status.Text = "Detenido."
+    end
+end
 local function playRecording(events, name, looped, rec)
     if state.recording then stopRecording() end
     if state.playing then stopPlayback() end
     if not events or #events == 0 then Status.Text = "Grabación vacía."; return end
 
     local focused = UserInputService:GetFocusedTextBox()
-    if focused and focused.ReleaseFocus then
-        pcall(function() focused:ReleaseFocus() end)
+    if focused and focused:IsA("TextBox") then
+        if focused.ReleaseFocus then pcall(function() focused:ReleaseFocus() end) end
     end
 
     if rec and rec.startViewport and #rec.startViewport == 2 then
@@ -2073,6 +2108,12 @@ local function playRecording(events, name, looped, rec)
     state.hrpKeyframes = hrpKFs
     state.hasHrpData = (hrpCount > 0)
     activeTouchIds = {}
+
+    -- ---- OVERDUB: preparar buffer ----
+    state.playingName    = name
+    state.overdubEvents  = {}
+    state.playingEvents  = events
+    state.playingRec     = rec
 
     if state.hasHrpData and state.moveEnabled then
         local char = LocalPlayer.Character
@@ -2154,7 +2195,6 @@ local function playRecording(events, name, looped, rec)
         end
     end)
 end
-
 --==================================================================
 --  LISTA (Encapsulada)
 --==================================================================
@@ -2462,38 +2502,66 @@ do
 end
 
 --==================================================================
---  GRABACIÓN INPUT HOOKS (Encapsulados)
+--==================================================================
+--  GRABACIÓN INPUT HOOKS (record + overdub durante playback)
 --==================================================================
 do
+    local function canCaptureInput()
+        if state.injecting then return false end
+        if not (state.recording or state.playing) then return false end
+        if UserInputService:GetFocusedTextBox() then return false end
+        return true
+    end
+
+    local function pushLive(ev)
+        if state.recording then
+            pushEvent(ev)
+        elseif state.playing and state.overdubEvents and state.playLoopStart then
+            ev.t = os.clock() - state.playLoopStart
+            table.insert(state.overdubEvents, ev)
+        end
+    end
+
     UserInputService.InputBegan:Connect(function(input, gp)
-        if not state.recording or UserInputService:GetFocusedTextBox() then return end
+        if not canCaptureInput() then return end
+        if gp then return end
         if input.KeyCode == Enum.KeyCode.F8 or input.KeyCode == Enum.KeyCode.F9
-           or input.KeyCode == Enum.KeyCode.F10 or isOverGui() then return end
+           or input.KeyCode == Enum.KeyCode.F10 or input.KeyCode == Enum.KeyCode.F11
+           or isOverGui() then return end
         if input.UserInputType == Enum.UserInputType.Keyboard then
-            pushEvent({ type = "keydown", key = input.KeyCode.Name })
-        elseif input.UserInputType == Enum.UserInputType.MouseButton1 then pushEvent({ type = "m1down" })
-        elseif input.UserInputType == Enum.UserInputType.MouseButton2 then pushEvent({ type = "m2down" }) end
+            pushLive({ type = "keydown", key = input.KeyCode.Name })
+        elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
+            pushLive({ type = "m1down" })
+        elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+            pushLive({ type = "m2down" })
+        end
     end)
+
     UserInputService.InputEnded:Connect(function(input, gp)
-        if not state.recording or UserInputService:GetFocusedTextBox() then return end
+        if not canCaptureInput() then return end
         if input.KeyCode == Enum.KeyCode.F8 or input.KeyCode == Enum.KeyCode.F9
-           or input.KeyCode == Enum.KeyCode.F10 or isOverGui() then return end
+           or input.KeyCode == Enum.KeyCode.F10 or input.KeyCode == Enum.KeyCode.F11
+           or isOverGui() then return end
         if input.UserInputType == Enum.UserInputType.Keyboard then
-            pushEvent({ type = "keyup", key = input.KeyCode.Name })
-        elseif input.UserInputType == Enum.UserInputType.MouseButton1 then pushEvent({ type = "m1up" })
-        elseif input.UserInputType == Enum.UserInputType.MouseButton2 then pushEvent({ type = "m2up" }) end
+            pushLive({ type = "keyup", key = input.KeyCode.Name })
+        elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
+            pushLive({ type = "m1up" })
+        elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+            pushLive({ type = "m2up" })
+        end
     end)
+
     UserInputService.InputChanged:Connect(function(input)
-        if not state.recording then return end
+        if not canCaptureInput() then return end
         if input.UserInputType == Enum.UserInputType.MouseWheel then
-            pushEvent({ type = "wheel", delta = input.Position.Z })
+            pushLive({ type = "wheel", delta = input.Position.Z })
         end
     end)
 
     if TouchEnabled then
         UserInputService.InputBegan:Connect(function(input, gp)
             if input.UserInputType ~= Enum.UserInputType.Touch then return end
-            if not state.recording then return end
+            if not canCaptureInput() then return end
             if isPointOverMainGui(input.Position.X, input.Position.Y) then return end
             if touchMap[input] then return end
 
@@ -2501,12 +2569,12 @@ do
             local id = nextTouchId
             touchMap[input] = { id = id, x = input.Position.X, y = input.Position.Y }
             lastTouchPositions[id] = Vector2.new(input.Position.X, input.Position.Y)
-            pushEvent({ type = "touchdown", x = input.Position.X, y = input.Position.Y, id = id })
+            pushLive({ type = "touchdown", x = input.Position.X, y = input.Position.Y, id = id })
         end)
 
         UserInputService.InputChanged:Connect(function(input, gp)
             if input.UserInputType ~= Enum.UserInputType.Touch then return end
-            if not state.recording then return end
+            if not canCaptureInput() then return end
             local info = touchMap[input]
             if not info then return end
             if isPointOverMainGui(input.Position.X, input.Position.Y) then return end
@@ -2517,58 +2585,22 @@ do
             lastTouchPositions[info.id] = newPos
 
             info.x, info.y = newPos.X, newPos.Y
-            pushEvent({ type = "touchmove", x = newPos.X, y = newPos.Y, id = info.id })
+            pushLive({ type = "touchmove", x = newPos.X, y = newPos.Y, id = info.id })
         end)
 
         UserInputService.InputEnded:Connect(function(input, gp)
             if input.UserInputType ~= Enum.UserInputType.Touch then return end
-            if not state.recording then return end
+            if not (state.recording or state.playing) then return end
+            if state.injecting then return end
             local info = touchMap[input]
             if not info then return end
 
             touchMap[input] = nil
             lastTouchPositions[info.id] = nil
-            pushEvent({ type = "touchup", x = input.Position.X, y = input.Position.Y, id = info.id })
+            pushLive({ type = "touchup", x = input.Position.X, y = input.Position.Y, id = info.id })
         end)
     end
 end
-
-RunService.RenderStepped:Connect(function()
-    if state.recording then
-        Chrono.Text = fmtDuration(os.clock() - state.recordStart)
-        if MouseEnabled then
-            local mp = UserInputService:GetMouseLocation()
-            if (mp - lastMousePos).Magnitude > REC_MOUSE_MIN_PIXELS then
-                pushEvent({ type = "mouse", x = mp.X, y = mp.Y }); lastMousePos = mp
-            end
-        end
-        local cam = workspace.CurrentCamera
-        if cam then
-            local cfChanged  = cframesDiffer(lastCamCFrame, cam.CFrame, REC_CAM_POS_THRESH, REC_CAM_ROT_THRESH)
-            local fovChanged = lastCamFOV == nil or math.abs(lastCamFOV - cam.FieldOfView) > REC_CAM_FOV_THRESH
-            if cfChanged or fovChanged then
-                pushEvent({ type = "cam", cframe = { cam.CFrame:GetComponents() }, fov = cam.FieldOfView })
-                lastCamCFrame = cam.CFrame
-                lastCamFOV    = cam.FieldOfView
-            end
-        end
-        if state.moveEnabled then
-            local char = LocalPlayer.Character
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                if cframesDiffer(lastHrpCFrame, hrp.CFrame, REC_HRP_POS_THRESH, REC_HRP_ROT_THRESH) then
-                    pushEvent({ type = "hrp", cframe = { hrp.CFrame:GetComponents() } })
-                    lastHrpCFrame = hrp.CFrame
-                end
-            end
-        end
-    elseif state.playing then
-        if state.playStart then Chrono.Text = fmtDuration(os.clock() - state.playStart) end
-    else
-        Chrono.Text = "00:00.000"
-    end
-    pcall(tryFixedClick)
-end)
 
 --==================================================================
 --  INIT
